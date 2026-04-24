@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>İstanbul Trafik Analiz - Demo</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+            border-radius: 10px;
+        }
+
+        .legend {
+            background: white;
+            padding: 10px;
+            line-height: 1.5;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>🚀 İstanbul Trafik Anomali Analizi</h2>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // 1. Haritayı İstanbul'a Odakla
+        const map = L.map('map').setView([41.0082, 28.9784], 11);
+
+        // 2. Alt Harita (Base Layer) Ekle
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        // 3. Fikrat'ın Backend'inden Verileri Çek
+        fetch('http://localhost:8000/api/clusters')
+            .then(response => response.json())
+            .then(data => {
+                L.geoJSON(data, {
+                    pointToLayer: (feature, latlng) => {
+                        // Şiddete göre renk belirle (HIGH=Kırmızı, MEDIUM=Turuncu, LOW=Mavi)
+                        let color = feature.properties.severity === 'HIGH' ? '#ff4d4d' :
+                            feature.properties.severity === 'MEDIUM' ? '#ffa500' : '#4d94ff';
+
+                        return L.circleMarker(latlng, {
+                            radius: 10,
+                            fillColor: color,
+                            color: "#000",
+                            weight: 1,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        });
+                    },
+                    onEachFeature: (feature, layer) => {
+                        function esc(str) {
+                            if (str == null) return '';
+                            return String(str)
+                                .replace(/&/g, '&amp;')
+                                .replace(/</g, '&lt;')
+                                .replace(/>/g, '&gt;')
+                                .replace(/"/g, '&quot;');
+                        }
+                        // Tıklayınca bilgi kutucuğu (Popup)
+                        layer.bindPopup(`
+                            <strong>📍 Yol:</strong> ${esc(feature.properties.road_name)}<br>
+                            <strong>⚠️ Şiddet:</strong> ${esc(feature.properties.severity)}<br>
+                            <strong>⏰ Zirve Saat:</strong> ${esc(feature.properties.peak_time)}<br>
+                            <strong>📊 Araç Sayısı:</strong> ${esc(feature.properties.avg_vehicle_count)}
+                        `);
+                    }
+                }).addTo(map);
+            })
+            .catch(err => console.error("Backend'e bağlanılamadı!", err));
+    </script>
+</body>
+
+</html>

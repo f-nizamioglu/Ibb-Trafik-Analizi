@@ -1,0 +1,28 @@
+# ─── Secrets ───
+.env
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# ─── Data (too large for Git) ───
+ibb_trafik_verileri/
+osrm-data/
+*.csv
+*.gpkg
+*.qgz
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── OS ───
+Thumbs.db
+.DS_Store
