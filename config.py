@@ -1,7 +1,7 @@
 """
 Centralized configuration for Istanbul Traffic Anomaly Analysis.
 
-All database, OSRM, and algorithm parameters are loaded from environment
+All database and algorithm parameters are loaded from environment
 variables (via .env file) so credentials never appear in source code.
 """
 
@@ -30,17 +30,11 @@ DB_CONFIG = {
 # Async DSN for asyncpg (FastAPI backend)
 DATABASE_URL = settings.database_url
 
-# ─── OSRM (Map Matching) ──────────────────────────────────────────────────
-OSRM_URL = settings.osrm_url
 
-# ─── ST-DBSCAN Parameters ─────────────────────────────────────────────────
-EPS1_DEG = 0.005          # ~500 m at Istanbul's latitude
-EPS1_METERS = 500.0       # human-readable equivalent
-EPS2_SEC = 3600.0         # 1 hour
+
+# ─── ST_ClusterDBSCAN Parameters (PostGIS-native, metric) ─────────────────
+EPS_METERS = 500.0        # spatial epsilon in metres (EPSG:32636 = metric)
 MINPTS = 3                # minimum points to form a core
-
-# ─── Safety Guards ─────────────────────────────────────────────────────────
-MAX_CLUSTER_INPUT = 100_000  # max rows before requiring partitioning
 
 # ─── AIS (Anomaly Intensity Score) Weights ─────────────────────────────────
 AIS_WEIGHTS = settings.ais_weights

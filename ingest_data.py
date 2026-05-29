@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS ibb_traffic_density (
     max_speed INTEGER,
     avg_speed INTEGER,
     vehicle_count INTEGER,
-    geom GEOMETRY(Point, 4326)
+    geom GEOMETRY(Point, 32636)
 );
 """
 
@@ -43,7 +43,7 @@ INSERT INTO ibb_traffic_density (
 
 ROW_TEMPLATE = (
     "(%s, %s, %s, %s, %s, %s, %s, %s, "
-    "ST_SetSRID(ST_MakePoint(%s::double precision, %s::double precision), 4326))"
+    "ST_Transform(ST_SetSRID(ST_MakePoint(%s::double precision, %s::double precision), 4326), 32636))"
 )
 
 
@@ -96,6 +96,9 @@ def main() -> None:
     try:
         logger.info("Ensuring PostGIS extension...")
         cur.execute("CREATE EXTENSION IF NOT EXISTS postgis CASCADE;")
+
+        logger.info("Dropping old table (SRID migration)...")
+        cur.execute("DROP TABLE IF EXISTS ibb_traffic_density CASCADE;")
 
         logger.info("Creating table...")
         cur.execute(CREATE_TABLE_SQL)

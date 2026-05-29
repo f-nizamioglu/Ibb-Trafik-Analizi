@@ -17,30 +17,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── OSRM (Map Matching) ────────────────────────────────────────────────
-  # Pre-processing steps (run ONCE before first startup):
-  #
-  #   mkdir osrm-data
-  #   wget https://download.geofabrik.de/europe/turkey-latest.osm.pbf -P osrm-data/
-  #
-  #   docker run --rm -v ./osrm-data:/data osrm/osrm-backend osrm-extract -p /opt/car.lua /data/turkey-latest.osm.pbf
-  #   docker run --rm -v ./osrm-data:/data osrm/osrm-backend osrm-partition /data/turkey-latest.osrm
-  #   docker run --rm -v ./osrm-data:/data osrm/osrm-backend osrm-customize /data/turkey-latest.osrm
-  #
-  # After that, `docker compose up` will start OSRM automatically.
-  osrm:
-    image: osrm/osrm-backend:latest
-    container_name: istanbul_osrm
-    ports:
-      - "5001:5000"
-    volumes:
-      - ./osrm-data:/data
-    command: osrm-routed --algorithm mld /data/turkey-latest.osrm
-    depends_on:
-      db:
-        condition: service_healthy
-    profiles:
-      - map-matching  # only starts with: docker compose --profile map-matching up
 
 volumes:
   istanbul_mobilitydb_data:

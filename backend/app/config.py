@@ -21,8 +21,7 @@ class Settings(BaseSettings):
     db_user: str = "postgres"
     db_password: str = ""
 
-    # OSRM
-    osrm_url: str = "http://localhost:5001"
+
 
     # App
     app_env: str = "development"

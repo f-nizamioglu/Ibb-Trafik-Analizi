@@ -40,8 +40,8 @@ async def list_clusters(
     Get all traffic anomaly clusters as a GeoJSON FeatureCollection.
 
     Each Feature contains:
-    - geometry: centroid Point (snapped to road if available)
-    - properties: AIS score, severity, metrics, peak time, road name
+    - geometry: centroid Point
+    - properties: AIS score, severity, metrics, peak time
 
     Leaflet usage: `L.geoJSON(data).addTo(map)`
     """

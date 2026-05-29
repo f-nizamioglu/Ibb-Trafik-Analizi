@@ -1,9 +1,15 @@
 """
 Business logic for cluster data retrieval and GeoJSON formatting.
+
+Clustering is performed entirely in PostGIS using ST_ClusterDBSCAN on the
+high_congestion_zones view. The EPSG:32636 geometry enables direct metric
+distance calculations. Centroids are transformed back to WGS84 (EPSG:4326)
+for Leaflet.js consumption via ST_Transform.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 
 from backend.app.config import get_settings
@@ -18,10 +24,19 @@ from backend.app.models.cluster import (
     StatsResponse,
 )
 
+logger = logging.getLogger(__name__)
+
+# ── Clustering Parameters (metric, EPSG:32636) ────────────────────────────
+_EPS_METERS = 500.0
+_MINPOINTS = 3
+
+# ── Cache ──────────────────────────────────────────────────────────────────
 _cache: dict = {}
 _CACHE_TTL = 60
 
+
 async def get_cached_cluster_summaries() -> list[dict]:
+    """Return cached cluster summaries, re-computing if stale."""
     now = time.monotonic()
     if "clusters" not in _cache or now - _cache.get("ts", 0) > _CACHE_TTL:
         _cache["clusters"] = await get_cluster_summaries()
@@ -29,33 +44,52 @@ async def get_cached_cluster_summaries() -> list[dict]:
     return _cache["clusters"]
 
 
+# ── PostGIS ST_ClusterDBSCAN → aggregated cluster stats in one query ──────
+_CLUSTER_SUMMARY_SQL = """
+WITH clustered AS (
+    SELECT
+        record_time,
+        vehicle_count,
+        avg_speed,
+        geom,
+        COALESCE(
+            ST_ClusterDBSCAN(geom, eps := $1, minpoints := $2) OVER (),
+            -1
+        ) AS cluster_id
+    FROM high_congestion_zones
+)
+SELECT
+    cluster_id,
+    COUNT(*)::int                                                   AS point_count,
+    AVG(vehicle_count)::float                                       AS avg_vehicle_count,
+    AVG(avg_speed)::float                                           AS avg_speed,
+    EXTRACT(EPOCH FROM (MAX(record_time) - MIN(record_time)))
+        / 3600.0                                                    AS duration_hours,
+    COUNT(DISTINCT record_time::date)::int                          AS recurrence_days,
+    MODE() WITHIN GROUP (ORDER BY EXTRACT(HOUR FROM record_time))::int AS peak_hour,
+    MODE() WITHIN GROUP (ORDER BY TO_CHAR(record_time, 'Day'))      AS peak_day,
+    ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lat,
+    ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lon
+FROM clustered
+WHERE cluster_id >= 0
+GROUP BY cluster_id
+ORDER BY avg_vehicle_count DESC;
+"""
+
+
 async def get_cluster_summaries() -> list[dict]:
     """
-    Get aggregated cluster statistics from the database.
+    Run ST_ClusterDBSCAN on high_congestion_zones and return per-cluster statistics.
 
-    Returns per-cluster: centroid, avg metrics, duration, recurrence,
-    peak time, road name, and AIS-relevant fields.
+    The clustering is executed inside the database using PostGIS's native
+    ST_ClusterDBSCAN window function. Cluster centroids are computed from the
+    collected geometries and transformed back to WGS84 for frontend display.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT
-                cluster_id,
-                COUNT(*)::int AS point_count,
-                AVG(vehicle_count)::float AS avg_vehicle_count,
-                AVG(avg_speed)::float AS avg_speed,
-                EXTRACT(EPOCH FROM (MAX(record_time) - MIN(record_time))) / 3600.0::float AS duration_hours,
-                COUNT(DISTINCT record_time::date)::int AS recurrence_days,
-                MODE() WITHIN GROUP (ORDER BY EXTRACT(HOUR FROM record_time))::int AS peak_hour,
-                MODE() WITHIN GROUP (ORDER BY TO_CHAR(record_time, 'Day')) AS peak_day,
-                AVG(COALESCE(snapped_lat, lat))::float AS centroid_lat,
-                AVG(COALESCE(snapped_lon, lon))::float AS centroid_lon,
-                MODE() WITHIN GROUP (ORDER BY road_name) AS road_name
-            FROM traffic_clusters
-            WHERE cluster_id >= 0
-            GROUP BY cluster_id
-            ORDER BY avg_vehicle_count DESC;
-        """)
+        rows = await conn.fetch(
+            _CLUSTER_SUMMARY_SQL, _EPS_METERS, _MINPOINTS
+        )
     return [dict(r) for r in rows]
 
 
@@ -128,9 +162,6 @@ def build_geojson(clusters: list[dict]) -> GeoJSONFeatureCollection:
                 peak_hour=c["peak_hour"],
                 peak_day=c.get("peak_day", "").strip(),
                 peak_time=f"{c.get('peak_day', '').strip()} {int(c['peak_hour']):02d}:00",
-                road_name=c.get("road_name"),
-                snapped_lat=c.get("centroid_lat"),
-                snapped_lon=c.get("centroid_lon"),
             ),
         )
         features.append(feature)
@@ -138,9 +169,39 @@ def build_geojson(clusters: list[dict]) -> GeoJSONFeatureCollection:
     return GeoJSONFeatureCollection(features=features)
 
 
+# ── Heatmap SQL (transform back to WGS84 for Leaflet) ─────────────────────
+_HEATMAP_SQL_FILTERED = """
+SELECT
+    ST_Y(ST_Transform(geom, 4326))::float AS lat,
+    ST_X(ST_Transform(geom, 4326))::float AS lon,
+    vehicle_count,
+    avg_speed,
+    record_time::text AS record_time
+FROM high_congestion_zones
+WHERE record_time::date = $1::date
+ORDER BY vehicle_count DESC
+LIMIT 5000;
+"""
+
+_HEATMAP_SQL_ALL = """
+SELECT
+    ST_Y(ST_Transform(geom, 4326))::float AS lat,
+    ST_X(ST_Transform(geom, 4326))::float AS lon,
+    vehicle_count,
+    avg_speed,
+    record_time::text AS record_time
+FROM high_congestion_zones
+ORDER BY vehicle_count DESC
+LIMIT 5000;
+"""
+
+
 async def get_heatmap_data(date_filter: str | None = None) -> HeatmapResponse:
     """
     Get raw traffic points for heatmap visualization.
+
+    Coordinates are transformed from EPSG:32636 back to WGS84 (EPSG:4326)
+    for Leaflet.heat consumption.
 
     Parameters
     ----------
@@ -154,32 +215,9 @@ async def get_heatmap_data(date_filter: str | None = None) -> HeatmapResponse:
     pool = await get_pool()
     async with pool.acquire() as conn:
         if date_filter:
-            rows = await conn.fetch("""
-                SELECT
-                    COALESCE(snapped_lat, lat) AS lat,
-                    COALESCE(snapped_lon, lon) AS lon,
-                    vehicle_count,
-                    avg_speed,
-                    record_time::text AS record_time
-                FROM traffic_clusters
-                WHERE record_time::date = $1::date
-                  AND cluster_id >= 0
-                ORDER BY vehicle_count DESC
-                LIMIT 5000;
-            """, date_filter)
+            rows = await conn.fetch(_HEATMAP_SQL_FILTERED, date_filter)
         else:
-            rows = await conn.fetch("""
-                SELECT
-                    COALESCE(snapped_lat, lat) AS lat,
-                    COALESCE(snapped_lon, lon) AS lon,
-                    vehicle_count,
-                    avg_speed,
-                    record_time::text AS record_time
-                FROM traffic_clusters
-                WHERE cluster_id >= 0
-                ORDER BY vehicle_count DESC
-                LIMIT 5000;
-            """)
+            rows = await conn.fetch(_HEATMAP_SQL_ALL)
 
     if not rows:
         return HeatmapResponse(date=date_filter, point_count=0, points=[])
@@ -202,19 +240,23 @@ async def get_heatmap_data(date_filter: str | None = None) -> HeatmapResponse:
     return HeatmapResponse(date=date_filter, point_count=len(points), points=points)
 
 
+# ── Global stats (reads from traffic_clusters table for persistence) ──────
+_STATS_SQL = """
+SELECT
+    (SELECT COUNT(*) FROM high_congestion_zones)::int                       AS total_records,
+    COUNT(DISTINCT CASE WHEN cluster_id >= 0 THEN cluster_id END)::int      AS total_clusters,
+    COUNT(CASE WHEN cluster_id = -1 THEN 1 END)::int                        AS total_noise_points,
+    MIN(record_time)::text                                                  AS date_range_start,
+    MAX(record_time)::text                                                  AS date_range_end
+FROM traffic_clusters;
+"""
+
+
 async def get_global_stats() -> StatsResponse:
     """Get global statistics for the dashboard."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT
-                COUNT(*)::int AS total_records,
-                COUNT(DISTINCT CASE WHEN cluster_id >= 0 THEN cluster_id END)::int AS total_clusters,
-                COUNT(CASE WHEN cluster_id = -1 THEN 1 END)::int AS total_noise_points,
-                MIN(record_time)::text AS date_range_start,
-                MAX(record_time)::text AS date_range_end
-            FROM traffic_clusters;
-        """)
+        row = await conn.fetchrow(_STATS_SQL)
 
     total = row["total_records"] or 0
     noise = row["total_noise_points"] or 0

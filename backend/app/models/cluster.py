@@ -26,9 +26,6 @@ class ClusterProperties(BaseModel):
     peak_hour: int
     peak_day: str
     peak_time: str = Field(..., description="Combined peak day/hour for display")
-    road_name: Optional[str] = None
-    snapped_lat: Optional[float] = None
-    snapped_lon: Optional[float] = None
 
 
 class ClusterSummary(BaseModel):

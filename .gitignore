@@ -1,6 +1,10 @@
 # ─── Secrets ───
 .env
 
+*.pdf
+
+*.tex
+
 # ─── Python ───
 __pycache__/
 *.py[cod]

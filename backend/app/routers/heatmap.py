@@ -30,7 +30,7 @@ async def heatmap(
     Get traffic density points with normalised intensity for heatmap rendering.
 
     Each point has:
-    - lat, lon: coordinates (snapped to road if available)
+    - lat, lon: coordinates
     - intensity: normalised value [0, 1] based on vehicle count
     - vehicle_count, avg_speed: raw values
 

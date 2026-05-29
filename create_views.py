@@ -1,8 +1,8 @@
 """
 Create spatial indexes and materialized views for ST-DBSCAN analysis.
 
-Includes the high_congestion_zones view and the updated traffic_clusters
-table schema with avg_speed + snapped coordinates for map matching.
+Includes the high_congestion_zones view and the traffic_clusters
+table schema with avg_speed for ST-DBSCAN analysis.
 
 Usage:
     python create_views.py
@@ -35,7 +35,7 @@ WHERE avg_speed < {HIGH_CONGESTION_MAX_AVG_SPEED}
   AND vehicle_count > {HIGH_CONGESTION_MIN_VEHICLE_COUNT};
 """
 
-# ─── Updated Clusters Table (includes avg_speed + snap columns) ───────────
+# ─── Clusters Table ───────────────────────────────────────────────────────
 CREATE_CLUSTERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS traffic_clusters (
     id SERIAL PRIMARY KEY,
@@ -45,11 +45,7 @@ CREATE TABLE IF NOT EXISTS traffic_clusters (
     geohash VARCHAR(20),
     vehicle_count INTEGER,
     avg_speed INTEGER,
-    cluster_id INTEGER,
-    snapped_lat DOUBLE PRECISION,
-    snapped_lon DOUBLE PRECISION,
-    road_name TEXT,
-    snap_distance_m DOUBLE PRECISION
+    cluster_id INTEGER
 );
 """
 
@@ -77,7 +73,7 @@ def main() -> None:
         logger.info("Creating view high_congestion_zones ...")
         cur.execute(CREATE_VIEW_SQL)
 
-        logger.info("Creating table traffic_clusters (with avg_speed + snap columns) ...")
+        logger.info("Creating table traffic_clusters ...")
         cur.execute(CREATE_CLUSTERS_TABLE_SQL)
 
         logger.info("Creating index on traffic_clusters.cluster_id ...")
@@ -92,7 +88,7 @@ def main() -> None:
             "  - idx_ibb_traffic_geom (GiST spatial index)\n"
             f"  - high_congestion_zones (avg_speed < {HIGH_CONGESTION_MAX_AVG_SPEED}, "
             f"vehicle_count > {HIGH_CONGESTION_MIN_VEHICLE_COUNT})\n"
-            "  - traffic_clusters (with avg_speed, geohash, snap columns)\n"
+            "  - traffic_clusters (with avg_speed, geohash)\n"
             "  - idx_traffic_clusters_cluster_id"
         )
     finally:
