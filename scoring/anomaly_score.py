@@ -158,8 +158,8 @@ def print_cluster_report(scores: pd.DataFrame) -> None:
     logger.info("=" * 80)
 
     for cluster_id, row in scores.iterrows():
-        severity_icon = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(
-            str(row["severity"]), "⚪"
+        severity_icon = {"HIGH": "[HIGH]", "MEDIUM": "[MED]", "LOW": "[LOW]"}.get(
+            str(row["severity"]), "[?]"
         )
         logger.info(
             f"\n  {severity_icon} Cluster {cluster_id:>3d}  |  "

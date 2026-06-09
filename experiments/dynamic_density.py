@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import math
 import sys
 from pathlib import Path
 
@@ -47,45 +46,12 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs" / "experiments"
 CSV_OUTPUT = OUTPUT_DIR / "density_comparison.csv"
 MD_OUTPUT = OUTPUT_DIR / "density_comparison.md"
 
-# ── Geohash decoder (no external dependency) ─────────────────────────────────
-_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
-
-
-def _decode_geohash_bounds(gh: str) -> tuple[float, float, float, float]:
-    """Return (min_lat, min_lon, max_lat, max_lon) for a geohash cell."""
-    lat_range = [-90.0, 90.0]
-    lon_range = [-180.0, 180.0]
-    is_lon = True
-    for char in gh:
-        try:
-            bits = _BASE32.index(char)
-        except ValueError:
-            raise ValueError(f"Invalid geohash character: '{char}'")
-        for i in range(4, -1, -1):
-            bit = (bits >> i) & 1
-            if is_lon:
-                mid = (lon_range[0] + lon_range[1]) / 2
-                if bit:
-                    lon_range[0] = mid
-                else:
-                    lon_range[1] = mid
-            else:
-                mid = (lat_range[0] + lat_range[1]) / 2
-                if bit:
-                    lat_range[0] = mid
-                else:
-                    lat_range[1] = mid
-            is_lon = not is_lon
-    return lat_range[0], lon_range[0], lat_range[1], lon_range[1]
-
-
-def cell_area_km2(gh: str) -> float:
-    """Approximate cell area in km² using the geohash bounding box."""
-    min_lat, min_lon, max_lat, max_lon = _decode_geohash_bounds(gh)
-    lat_km = (max_lat - min_lat) * 111.1
-    mid_lat_rad = math.radians((min_lat + max_lat) / 2)
-    lon_km = (max_lon - min_lon) * 111.1 * math.cos(mid_lat_rad)
-    return lat_km * lon_km
+# ── Geohash utilities (shared via scoring.geohash_utils) ─────────────────────
+from scoring.geohash_utils import (  # noqa: E402
+    decode_geohash_bounds as _decode_geohash_bounds,
+    cell_area_km2,
+    compute_density_candidates as _shared_compute_density_candidates,
+)
 
 
 # ── SQL ──────────────────────────────────────────────────────────────────────
@@ -129,22 +95,8 @@ def compute_density_candidates(
     percentile: float,
     min_vehicles: int,
 ) -> tuple[set[str], float]:
-    """
-    Apply percentile-based density threshold to select high-density geohash cells.
-
-    Returns (set of selected geohashes, density threshold used).
-    """
-    # Only consider cells with enough vehicle activity
-    active = [r for r in geohash_aggs if r["avg_vehicle_count"] >= min_vehicles]
-    if not active:
-        return set(), 0.0
-
-    densities = sorted(r["vehicles_per_km2"] for r in active)
-    idx = max(0, int(len(densities) * percentile / 100) - 1)
-    threshold = densities[idx]
-
-    selected = {r["geohash"] for r in active if r["vehicles_per_km2"] >= threshold}
-    return selected, threshold
+    """Apply percentile-based density threshold. Delegates to scoring.geohash_utils."""
+    return _shared_compute_density_candidates(geohash_aggs, percentile, min_vehicles)
 
 
 def main() -> None:
@@ -219,6 +171,9 @@ def main() -> None:
             conn.close()
             sys.exit(1)
     logger.info(f"  ibb_traffic_density: {n_rows:,} rows — OK\n")
+
+    from experiments._dataset_check import print_dataset_coverage
+    print_dataset_coverage(conn)
 
     # ── Load per-geohash aggregates ───────────────────────────────────────
     logger.info("Loading per-geohash aggregates ...")

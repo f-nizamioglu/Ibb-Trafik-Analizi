@@ -347,6 +347,9 @@ def main() -> None:
         conn.close()
         sys.exit(1)
 
+    from experiments._dataset_check import print_dataset_coverage
+    print_dataset_coverage(conn)
+
     results = []
     t_total_start = time.perf_counter()
     for idx, (speed, vehicle, eps, minpts) in enumerate(combos, 1):

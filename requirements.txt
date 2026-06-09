@@ -17,3 +17,9 @@ slowapi>=0.1.9
 
 # ─── Data Download ───
 beautifulsoup4>=4.12
+
+# ─── Road Network Import (OSM) ───
+# Required only for: python scripts/import_road_network.py
+# Reads .osm.pbf files via GDAL OSM driver (bundled with pyogrio).
+geopandas>=1.0
+pyogrio>=0.7

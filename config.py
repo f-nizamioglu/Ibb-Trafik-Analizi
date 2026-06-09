@@ -46,13 +46,23 @@ HIGH_CONGESTION_MIN_VEHICLE_COUNT = settings.high_congestion_min_vehicle_count
 DENSITY_FILTER_ENABLED = settings.density_filter_enabled
 DENSITY_PERCENTILE_THRESHOLD = settings.density_percentile_threshold
 
+# ─── Road-Network Density Filtering ───────────────────────────────────────
+# Requires: road_segments + geohash_road_lengths (run create_road_schema.py first).
+DENSITY_FILTER_METHOD = settings.density_filter_method          # static|geohash_area|road_length
+ROAD_DENSITY_PERCENTILE_THRESHOLD = settings.road_density_percentile_threshold
+
 # ─── AIS (Anomaly Intensity Score) Weights ─────────────────────────────────
 AIS_WEIGHTS = settings.ais_weights
 CITY_AVG_SPEED_KMH = 35.0  # Istanbul citywide average speed (km/h) baseline
 
 # ─── Data Paths ────────────────────────────────────────────────────────────
-CSV_DIR = PROJECT_ROOT / "ibb_trafik_verileri"
-CSV_PATH = CSV_DIR / "traffic_density_202501.csv"
+# Canonical raw data directory — all 61 monthly CSV files live here.
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw" / "ibb_hourly_traffic_density"
+MANIFEST_PATH = PROJECT_ROOT / "data" / "download_manifest.json"
+
+# IBB CKAN dataset identifier (confirmed working via API, 2025-06)
+IBB_DATASET_SLUG = "hourly-traffic-density-data-set"
+IBB_CKAN_BASE_URL = "https://data.ibb.gov.tr"
 
 # ─── Ingestion ─────────────────────────────────────────────────────────────
 BATCH_SIZE = 10_000

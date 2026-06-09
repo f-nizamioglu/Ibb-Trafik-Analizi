@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     density_filter_enabled: bool = False
     density_percentile_threshold: float = 75.0     # vehicles/km² percentile cutoff
 
+    # Road-network density filtering — requires road_segments + geohash_road_lengths.
+    # Set DENSITY_FILTER_METHOD=road_length after running:
+    #   python scripts/create_road_schema.py
+    #   python scripts/import_road_network.py
+    density_filter_method: str = "static"          # static | geohash_area | road_length
+    road_density_percentile_threshold: float = 75.0  # vehicles/road-km percentile cutoff
+
     @property
     def database_url(self) -> str:
         return (

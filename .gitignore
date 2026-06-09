@@ -17,9 +17,26 @@ venv/
 # ─── Data (too large for Git) ───
 ibb_trafik_verileri/
 osrm-data/
-*.csv
 *.gpkg
 *.qgz
+
+# ─── Raw downloaded traffic CSVs (too large for Git) ───
+data/raw/ibb_hourly_traffic_density/*.csv
+!data/raw/ibb_hourly_traffic_density/.gitkeep
+
+# ─── Experiment and pipeline output CSVs ───
+cluster_scores.csv
+outputs/experiments/*.csv
+
+# ─── Road network raw data (too large for Git) ───
+data/road_network/*
+!data/road_network/.gitkeep
+*.osm.pbf
+*.osm.gz
+*.shp
+*.dbf
+*.shx
+*.prj
 
 # ─── IDE ───
 .vscode/
