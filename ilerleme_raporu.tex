@@ -29,6 +29,7 @@
 \usepackage{longtable}
 \usepackage{array}
 \usepackage{float}
+\usepackage{graphicx}
 
 % ─── Renk ve Kutu ─────────────────────────────────────────────────────────
 \usepackage{xcolor}
@@ -542,6 +543,13 @@ Yalnızca bu yöntemde  & 17 & 176 & — \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/experiments/density_filter_comparison}
+\caption{Statik filtre ile geohash-alan yoğunluğu filtresinin karşılaştırılması}
+\label{fig:density-comparison}
+\end{figure}
+
 \subsection{Yol Ağı Tabanlı Yoğunluk Analizi}
 
 \textbf{Yaklaşım:} OpenStreetMap (OSM) verisi PostGIS'e aktarılarak her Geohash hücresiyle çakışan yol segmentlerinin toplam uzunluğu hesaplanır. Araç yoğunluğu bu uzunluğa (araç/yol-km) bölünerek yol ağı farkındaki bir yoğunluk skoru elde edilir.
@@ -591,6 +599,13 @@ Yalnızca yol yoğunluğu       & 298 \\
 \begin{notebox}
 Veri setinin \%34,5'i yol ağı kapsama alanı dışında kalan Geohash hücrelerine aittir. Bu hücrelerin araç yoğunluğu hesaplanamaz; dolayısıyla yol ağı tabanlı filtreleme bu kayıtları değerlendirememektedir. Bu durum, yol ağı yoğunluk yaklaşımının statik filtreye göre daha seçici olduğu bazı bölgelerde eksik kapsama yaratabileceğini göstermektedir. \texttt{sxk8xg} geohash'i gibi aşırı uç değerler (31.859~araç/yol-km, 0,002~km yol) mevcut OSM verisindeki kısa yol segmenti artifaktlarına işaret etmekte ve filtreleme öncesi temizlenmelidir.
 \end{notebox}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/experiments/road_density_filter_comparison}
+\caption{Statik filtre ile yol ağına duyarlı yoğunluk filtresinin karşılaştırılması}
+\label{fig:road-density}
+\end{figure}
 
 % ===========================================================================
 \section{İşlem Yükü Dağılımı: PostGIS İçinde mi, Python Dışında mı?}
@@ -757,9 +772,26 @@ Toplam çalışma süresi & 468,5~s \\
     \item \textbf{\texttt{eps} etkisi:} \texttt{eps = 1000}~m kullanıldığında temel konfigürasyondaki 116 küme 39 kümeye düşmektedir; geniş yarıçap birbirinden bağımsız bölgeleri birleştirmektedir. Bu gözlem, 500~m seçiminin İstanbul kavşak ölçeğiyle daha iyi örtüştüğünü desteklemektedir.
 \end{itemize}
 
-% [Şekil: threshold\_impact.png — hız ve araç eşiklerinin küme sayısına etkisi]
-% [Şekil: eps\_minpoints\_impact.png — eps ve minpoints kombinasyonlarının karşılaştırması]
-% [Şekil: runtime\_comparison.png — konfigürasyona göre çalışma süresi dağılımı]
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/experiments/threshold_impact}
+\caption{Hız ve araç eşiklerinin küme sayısına etkisi}
+\label{fig:threshold-impact}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/experiments/eps_minpoints_impact}
+\caption{eps ve minpoints parametrelerinin karşılaştırılması}
+\label{fig:eps-minpoints}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/experiments/runtime_comparison}
+\caption{Parametre konfigürasyonlarına göre çalışma süresi dağılımı}
+\label{fig:runtime}
+\end{figure}
 
 % ===========================================================================
 \section{Küme Doğrulama}
