@@ -1,13 +1,22 @@
 """
-Main pipeline entry point — PostGIS-native ST_ClusterDBSCAN.
+Main pipeline entry point — PostGIS-native spatial DBSCAN + AIS scoring.
 
-Orchestrates the full analysis workflow entirely in the database layer:
-  1. Run ST_ClusterDBSCAN on the high_congestion_zones view (PostGIS)
-  2. Write clustered results to the traffic_clusters table
-  3. Compute AIS (Anomaly Intensity Scores) from the clustered data
+Pipeline stages:
+  1. Raw IBB CSV download      (download_data.py — separate step)
+  2. Data ingestion             (ingest_data.py — separate step)
+  3. EPSG:32636 metric geometry (applied during ingestion)
+  4. Congestion candidate filter (high_congestion_zones VIEW, create_views.py)
+  5. PostGIS spatial DBSCAN     ← this script, Stage 1
+  6. Temporal recurrence/duration analysis (via AIS components)
+  7. AIS scoring                ← this script, Stage 2
 
-The clustering computation is offloaded to PostGIS, which uses the EPSG:32636
-(UTM Zone 36N) geometry column for direct metric distance calculations.
+Clustering is executed entirely within PostGIS using ST_ClusterDBSCAN over
+the EPSG:32636 geometry column, which allows eps to be specified in metres.
+Temporal behaviour is captured post-clustering through duration_hours and
+recurrence_days components of the AIS score.
+
+This is NOT a full Birant & Kut ST-DBSCAN implementation. There is no
+temporal epsilon (ε₂) neighbourhood constraint during clustering.
 
 Usage:
     python run_pipeline.py
@@ -15,7 +24,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import logging
 import time
 
@@ -25,8 +33,6 @@ from config import DB_CONFIG, EPS_METERS, MINPTS, ensure_cli_logging
 
 logger = logging.getLogger(__name__)
 
-# ── Tunables ───────────────────────────────────────────────────────────────
-CLI_BANNER_WIDTH = 60
 OUTPUT_CLUSTER_SCORES_CSV = "cluster_scores.csv"
 
 DROP_TABLE_SQL = "DROP TABLE IF EXISTS traffic_clusters;"
@@ -44,10 +50,10 @@ CREATE TABLE IF NOT EXISTS traffic_clusters (
 );
 """
 
-# ── PostGIS-native DBSCAN clustering ──────────────────────────────────────
+# ── Stage 5: PostGIS spatial DBSCAN ───────────────────────────────────────
 # ST_ClusterDBSCAN is a window function that assigns a cluster_id to each row.
 # It operates on the EPSG:32636 geometry column, so eps is in metres directly.
-# Noise points receive NULL from ST_ClusterDBSCAN; we COALESCE to -1.
+# Noise points receive NULL from ST_ClusterDBSCAN; mapped to -1.
 CLUSTER_AND_INSERT_SQL = """
 INSERT INTO traffic_clusters (
     record_time, lat, lon, geohash, vehicle_count, avg_speed, cluster_id
@@ -77,45 +83,44 @@ FROM traffic_clusters;
 
 def main() -> None:
     ensure_cli_logging()
-    parser = argparse.ArgumentParser(
-        description="Istanbul Traffic PostGIS ST_ClusterDBSCAN Pipeline"
-    )
-    parser.parse_args()
 
-    logger.info("Connecting to DB...")
+    logger.info("=" * 60)
+    logger.info("Istanbul Traffic Anomaly Analysis — Pipeline")
+    logger.info("=" * 60)
+    logger.info(f"  Methodology : PostGIS-based Spatial DBSCAN + Temporal Recurrence Analysis")
+    logger.info(f"  eps         : {EPS_METERS} m (EPSG:32636 metric geometry)")
+    logger.info(f"  minpoints   : {MINPTS}")
+
+    logger.info("\nConnecting to DB...")
     with psycopg2.connect(**DB_CONFIG) as conn:
         with conn.cursor() as cur:
-            # ── Step 1: Recreate traffic_clusters table ────────────────────
-            logger.info("Recreating traffic_clusters table...")
+
+            # ── Stage 5: Recreate traffic_clusters and run spatial DBSCAN ──
+            logger.info("\n[Stage 5] PostGIS spatial DBSCAN clustering ...")
+            logger.info("  Recreating traffic_clusters table ...")
             cur.execute(DROP_TABLE_SQL)
             cur.execute(CREATE_TABLE_SQL)
             conn.commit()
 
-            # ── Step 2: Run PostGIS ST_ClusterDBSCAN ──────────────────────
-            logger.info(
-                f"\nRunning PostGIS ST_ClusterDBSCAN "
-                f"(eps={EPS_METERS}m, minpoints={MINPTS})..."
-            )
+            logger.info(f"  Running ST_ClusterDBSCAN (eps={EPS_METERS}m, minpoints={MINPTS}) ...")
             t0 = time.perf_counter()
             cur.execute(CLUSTER_AND_INSERT_SQL, (EPS_METERS, MINPTS))
             elapsed = time.perf_counter() - t0
             conn.commit()
 
-            # ── Step 3: Report results ────────────────────────────────────
             cur.execute(COUNT_RESULTS_SQL)
             row = cur.fetchone()
             total_rows, n_clusters, n_noise = row
             noise_pct = 100.0 * n_noise / total_rows if total_rows else 0.0
 
-            logger.info(f"\n  Clustering complete in {elapsed:.2f}s")
-            logger.info(f"  Total rows:    {total_rows:,}")
-            logger.info(f"  Clusters found: {n_clusters}")
-            logger.info(f"  Noise: {n_noise:,} / {total_rows:,} ({noise_pct:.2f}%)")
+            logger.info(f"  Clustering complete in {elapsed:.2f}s")
+            logger.info(f"  Total candidate rows : {total_rows:,}")
+            logger.info(f"  Clusters found       : {n_clusters}")
+            logger.info(f"  Noise points         : {n_noise:,} ({noise_pct:.1f}%)")
 
-        # ── Step 4: AIS Scoring ───────────────────────────────────────────
+        # ── Stage 6–7: Temporal analysis + AIS scoring ─────────────────────
+        logger.info("\n[Stage 6-7] Temporal recurrence/duration analysis + AIS scoring ...")
         from scoring.anomaly_score import compute_cluster_scores, print_cluster_report
-
-        logger.info("\nComputing Anomaly Intensity Scores...")
 
         import pandas as pd
         df = pd.read_sql(
@@ -126,7 +131,6 @@ def main() -> None:
         scores = compute_cluster_scores(df)
         print_cluster_report(scores)
 
-        # Save scores to CSV for reference
         scores.to_csv(OUTPUT_CLUSTER_SCORES_CSV)
         logger.info(f"\nScores saved to {OUTPUT_CLUSTER_SCORES_CSV}")
 

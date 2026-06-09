@@ -27,6 +27,19 @@ osrm-data/
 *.swp
 *.swo
 
+# ─── Experiment outputs (generated, not source) ───
+outputs/experiments/*.csv
+outputs/experiments/*.png
+outputs/experiments/*.md
+
+# ─── AI agent directives (local only, not for repo) ───
+CLAUDE.md
+.claude/
+
+# ─── Session agent artefacts ───
+antigravity-*.patch
+antigravity-*.txt
+
 # ─── OS ───
 Thumbs.db
 .DS_Store

@@ -1,4 +1,10 @@
 """
+ARCHIVED — experimental implementation from an earlier Python-based approach.
+This file is not part of the active PostGIS-based pipeline.
+Active clustering is performed by run_pipeline.py via PostGIS ST_ClusterDBSCAN.
+
+---
+
 ST-DBSCAN-style clustering on high_congestion_zones using a joint spatio-temporal
 neighborhood: Euclidean distance in (lat, lon) degrees <= eps1 AND |dt| <= eps2.
 

@@ -21,17 +21,28 @@ class Settings(BaseSettings):
     db_user: str = "postgres"
     db_password: str = ""
 
-
-
     # App
     app_env: str = "development"
     allowed_origins: str = "http://localhost:3000,http://localhost:8000"
 
-    # AIS Weights
+    # AIS Weights (tunable via .env)
     ais_weight_volume: float = 0.30
     ais_weight_speed_drop: float = 0.30
     ais_weight_duration: float = 0.25
     ais_weight_recurrence: float = 0.15
+
+    # PostGIS ST_ClusterDBSCAN Parameters (metric, EPSG:32636)
+    dbscan_eps_meters: float = 500.0
+    dbscan_minpoints: int = 3
+
+    # Congestion Candidate Filter Thresholds (baseline static filter)
+    high_congestion_max_avg_speed: int = 20        # km/h
+    high_congestion_min_vehicle_count: int = 500
+
+    # Geohash Cell Density Prototype — opt-in, experimental approximation only.
+    # Not true road-length-aware density. Requires no road network data.
+    density_filter_enabled: bool = False
+    density_percentile_threshold: float = 75.0     # vehicles/km² percentile cutoff
 
     @property
     def database_url(self) -> str:

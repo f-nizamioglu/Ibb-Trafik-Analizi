@@ -70,7 +70,7 @@ def main() -> None:
         logger.info(
             "\nIf a single geohash shows averages in line with the rest of the city, "
             "congestion is plausibly real for that cell; if this view is empty or values "
-            "look extreme vs nearby cells, treat as a possible outlier for ST-DBSCAN."
+            "look extreme vs nearby cells, treat as a potential spatial clustering outlier."
         )
     finally:
         cur.close()

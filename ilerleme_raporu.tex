@@ -149,6 +149,10 @@ teknik gerekçeleriyle birlikte açıklamaktadır.}
 \tableofcontents
 \newpage
 
+\begin{abstract}
+Bu rapor, İstanbul Büyükşehir Belediyesi (İBB) Açık Veri Portalı'ndan elde edilen saatlik trafik yoğunluk verileri üzerinde zaman-uzamsal anomali tespiti gerçekleştiren bir sistemin tasarım ve geliştirme sürecini sunmaktadır. Sistem; PostgreSQL/PostGIS veritabanı altyapısı, PostGIS tabanlı mekansal DBSCAN kümeleme, zamansal tekrarlılık analizi ve çok kriterli Anomali Yoğunluk Skoru (AIS) hesaplamasından oluşan yedi aşamalı bir boru hattı mimarisi üzerine kurulmuştur. Kümeleme işlemi, PostGIS'in \texttt{ST\_ClusterDBSCAN} pencere fonksiyonu ile veritabanı içinde gerçekleştirilmekte, zamansal boyut ise kümeleme sonrası tekrarlılık ve süre analizi ile değerlendirilmektedir. Sonuçlar FastAPI tabanlı bir REST API aracılığıyla GeoJSON formatında sunulmakta ve Leaflet.js ile etkileşimli harita üzerinde görselleştirilmektedir.
+\end{abstract}
+
 % ===========================================================================
 \section{Proje Genel Bakışı ve Motivasyon}
 % ===========================================================================
@@ -189,9 +193,9 @@ Her satır, belirli bir coğrafi bölgedeki \textbf{tek bir saatlik ölçümü} 
 \texttt{LATITUDE}              & Ondalıklı     & Geohash hücresinin enlem değeri (WGS84, derece) \\
 \texttt{LONGITUDE}             & Ondalıklı     & Geohash hücresinin boylam değeri (WGS84, derece) \\
 \texttt{GEOHASH}               & Metin         & 6 karakterlik Geohash kodu; yaklaşık 1.2 km × 0.6 km hücre \\
-\texttt{MINIMUM\_SPEED}        & Tamsayı       & O saatte ölçülen en düşük araç hızı (km/s) \\
-\texttt{MAXIMUM\_SPEED}        & Tamsayı       & O saatte ölçülen en yüksek araç hızı (km/s) \\
-\texttt{AVERAGE\_SPEED}        & Tamsayı       & O saatteki ortalama araç hızı (km/s) \\
+\texttt{MINIMUM\_SPEED}        & Tamsayı       & O saatte ölçülen en düşük araç hızı (km/h) \\
+\texttt{MAXIMUM\_SPEED}        & Tamsayı       & O saatte ölçülen en yüksek araç hızı (km/h) \\
+\texttt{AVERAGE\_SPEED}        & Tamsayı       & O saatteki ortalama araç hızı (km/h) \\
 \texttt{NUMBER\_OF\_VEHICLES}  & Tamsayı       & O saatte ölçülen toplam araç adedi \\
 \bottomrule
 \end{tabularx}
@@ -233,7 +237,7 @@ Trafik verilerinin depolanmasında ilişkisel bir veritabanı tercih edilmiştir
 
 \textbf{İkincisi ve daha kritik olanı}, standart ilişkisel veritabanlarının coğrafi veriler için özel indeks ve operatör sağlamamasıdır. Bu eksikliği kapatmak amacıyla PostgreSQL 18 üzerine PostGIS 3.4 uzantısı etkinleştirilmiştir. PostGIS, veritabanına doğrudan nokta, çizgi, çokgen gibi geometri türleri; bu geometriler üzerinde mesafe, kesişim, tampon bölge gibi mekansal sorgular; ve en önemlisi bu sorguları hızlandıran GiST (Generalized Search Tree) mekansal indeks altyapısı kazandırmaktadır \cite{postgis-training}.
 
-Docker üzerinde çalıştırılan konteyner imajı olarak \texttt{mobilitydb/mobilitydb:latest} tercih edilmiştir. MobilityDB \cite{mobilitydb}, PostgreSQL/PostGIS üzerine inşa edilen ve hareketli nesnelerin zamansal geometri sorgularını destekleyen açık kaynaklı bir uzantıdır. Bu seçim, ilerleyen aşamalarda araç yörüngesi analizi gibi gelişmiş sorguların altyapıya entegre edilmesi ihtimaline karşı bir stratejik yatırım niteliği taşımaktadır \cite{springer-book}.
+Docker üzerinde çalıştırılan konteyner imajı olarak \texttt{mobilitydb/mobilitydb:latest} tercih edilmiştir. MobilityDB \cite{mobilitydb}, PostgreSQL/PostGIS üzerine inşa edilen ve hareketli nesnelerin zamansal geometri sorgularını destekleyen açık kaynaklı bir uzantıdır. Bu seçim, ilerleyen aşamalarda araç yörüngesi analizi gibi gelişmiş sorguların altyapıya entegre edilmesi ihtimaline karşı bir ileriki çalışmalarda kullanılabilecek bir altyapı seçeneği sunmaktadır \cite{springer-book}.
 
 \subsection{PostGIS'e Veri Aktarımı: Yöntem ve Gerekçe}
 
@@ -287,7 +291,7 @@ CREATE TABLE IF NOT EXISTS ibb_traffic_density (
 
 \subsubsection{Mekansal İndeks}
 
-PostGIS'in mekansal sorgu performansı, GiST (Generalized Search Tree) tabanlı R-tree indeksine dayanır \cite{crunchy-postgis}. Bu indeks olmadan, bir konumun belli bir yarıçap içindeki komşularını bulmak için tablodaki her satırın mesafesini hesaplamak gerekir — bu da tam tablo taraması anlamına gelir. GiST indeksi, yalnızca ilgili coğrafi bölgedeki kayıtlara ulaşarak bu süreci dramatik biçimde hızlandırır.
+PostGIS'in mekansal sorgu performansı, GiST (Generalized Search Tree) tabanlı R-tree indeksine dayanır \cite{crunchy-postgis}. Bu indeks olmadan, bir konumun belli bir yarıçap içindeki komşularını bulmak için tablodaki her satırın mesafesini hesaplamak gerekir — bu da tam tablo taraması anlamına gelir. GiST indeksi, yalnızca ilgili coğrafi bölgedeki kayıtlara ulaşarak bu süreci belirgin biçimde hızlandırır.
 
 \begin{lstlisting}[language=SQL, caption={GiST mekansal indeks oluşturma}]
 CREATE INDEX IF NOT EXISTS idx_ibb_traffic_geom
@@ -298,7 +302,7 @@ ON ibb_traffic_density USING GIST (geom);
 
 1.7 milyon satırlık ham veri üzerinde doğrudan kümeleme yapmak hem hesaplama maliyeti hem de anlamsızlık açısından uygun değildir: gece yarısı ıssız bir yolda 15 araçlık düzgün akış, anomali tespitinin dışında kalmalıdır. Bu nedenle analiz öncesinde bir ön eleme aşaması tasarlanmıştır.
 
-\texttt{high\_congestion\_zones} adlı SQL VIEW, \textbf{ortalama hızın 20 km/s'nin altında olduğu} (durma noktasına yakın yavaşlama) ve \textbf{araç sayısının 500'ün üzerinde olduğu} (anlamlı hacim) satırları seçer. Bu iki koşul birlikte, gerçek tıkanıklık potansiyeli taşıyan yaklaşık 50.000 satırlık işlenebilir bir alt küme oluşturmaktadır.
+\texttt{high\_congestion\_zones} adlı SQL VIEW, \textbf{ortalama hızın 20 km/h'nin altında olduğu} (durma noktasına yakın yavaşlama) ve \textbf{araç sayısının 500'ün üzerinde olduğu} (anlamlı hacim) satırları seçer. Bu iki koşul birlikte, gerçek tıkanıklık potansiyeli taşıyan yaklaşık 50.000 satırlık işlenebilir bir alt küme oluşturmaktadır.
 
 \begin{lstlisting}[language=SQL, caption={Tıkanıklık ön-filtre görünümü}]
 CREATE OR REPLACE VIEW high_congestion_zones AS
@@ -395,7 +399,7 @@ Standart DBSCAN uygulamaları, tüm nokta çiftleri arasındaki mesafe matrisini
 \text{Bellek} = \frac{n^2 \times 4 \;\text{bayt}}{10^9} \;\text{GB}
 \end{equation}
 
-1.7 milyon satırlık ham veri için bu değer \textbf{$\sim$11.56 TB}'a}, ön filtreden geçirilmiş 50.000 satır için ise \textbf{$\sim$9.3 GB}'a} ulaşır. Her iki durumda da olağan sunucu donanımında bu hesaplama ya başarısız olur ya da kabul edilemez süre gerektirir.
+1.7 milyon satırlık ham veri için bu değer \textbf{$\sim$11,56~TB}'a, ön filtreden geçirilmiş 50.000 satır için ise \textbf{$\sim$9,3~GB}'a ulaşır. Her iki durumda da olağan sunucu donanımında bu hesaplama ya başarısız olur ya da kabul edilemez süre gerektirir.
 
 Bu darboğazı ortadan kaldırmak için scikit-learn kütüphanesinin \texttt{BallTree} veri yapısı kullanılmıştır. BallTree, noktaları hiyerarşik iç içe geçmiş hipersfer (``top'') yapısına yerleştirir. Bir sorgu noktası için $\epsilon_1$ yarıçaplı komşuluk aranırken, ağacın dalları geometrik sınırlar karşılaştırılarak budanır (pruning); tüm veri kümesi yerine yalnızca potansiyel olarak yakın olan küçük bir alt küme değerlendirilir.
 
@@ -471,7 +475,7 @@ dbscan_inner(is_core, neighborhoods, labels)
 
 Tek aylık veri için BallTree yöntemi yeterlidir; ancak sisteme birden fazla aylık veri eklendiğinde (\textit{örn.} 63 aylık potansiyel tarihsel arşiv), \texttt{high\_congestion\_zones} görünümünden dönen satır sayısı \texttt{MAX\_CLUSTER\_INPUT} sınırını ($100.000$) aşabilir. Bu senaryo için \texttt{clustering/partitioner.py} modülünde Geohash tabanlı bölümleme uygulanmıştır.
 
-Yöntem şu ilkeye dayanır: İstanbul haritası 4 karakterlik Geohash prefix'lerine göre bağımsız hücrelere ayrılır; her hücredeki veriye bağımsız bir ST-DBSCAN çalıştırılır; ardından her hücreye özgü yerel küme etiketleri birbiriyle çakışmayacak şekilde küresel bir etiket uzayına eşlenir. Bu yaklaşım, haritaya indirgenmiş bir \textbf{Map-Reduce} paradigmasıdır: bağımsız işlemler (Map) birleştirilir (Reduce). Her bölümle ayrı ayrı çalışıldığından, tek bir çalıştırmanın bellek talebini sabit tutarken yatay ölçeklenebilirlik kazanılır.
+Yöntem şu ilkeye dayanır: İstanbul haritası 4 karakterlik Geohash prefix'lerine göre bağımsız hücrelere ayrılır; her hücredeki veriye bağımsız bir ST-DBSCAN çalıştırılır; ardından her hücreye özgü yerel küme etiketleri birbiriyle çakışmayacak şekilde küresel bir etiket uzayına eşlenir. Bu yaklaşım, geohash tabanlı bir bölümleme stratejisidir: bağımsız işlemler (Map) birleştirilir (Reduce). Her bölümle ayrı ayrı çalışıldığından, tek bir çalıştırmanın bellek talebini sabit tutarken yatay ölçeklenebilirlik kazanılır.
 
 \subsection{Çalışma Süresi Karşılaştırması}
 
@@ -521,7 +525,7 @@ PostGIS, veritabanı motorunun sunucuya yakın çalışması ve veri hareketini 
     \item \textbf{Geometri oluşturma ve depolama:} Her satırın koordinatları, aktarım anında SQL düzeyinde \texttt{ST\_MakePoint()} ile PostGIS Point nesnesine dönüştürülür; bu nesne EWKB (Extended Well-Known Binary) formatında diskte saklanır.
     \item \textbf{Mekansal indeksleme:} GiST tabanlı R-tree indeksi, bölgesel mekansal sorguları tam tablo taramasız yanıtlar.
     \item \textbf{Ön-filtreleme:} \texttt{high\_congestion\_zones} VIEW'u, kümeleme algoritmasına girdi sağlamadan önce veriyi 1.7M'den $\sim$50K satıra indirir.
-    \item \textbf{Küme istatistikleri:} FastAPI katmanı, küme merkezlerini, ortalama metrikleri ve zirve zamanlarını SQLüzerinden hesaplar. \texttt{cluster\_service.py} içindeki SQL, \texttt{AVG}, \texttt{COUNT}, \texttt{MODE() WITHIN GROUP} ve \texttt{EXTRACT()} gibi pencere ve agregat fonksiyonlarını kullanır.
+    \item \textbf{Küme istatistikleri:} FastAPI katmanı, küme merkezlerini, ortalama metrikleri ve zirve zamanlarını SQL üzerinden hesaplar. \texttt{cluster\_service.py} içindeki SQL, \texttt{AVG}, \texttt{COUNT}, \texttt{MODE() WITHIN GROUP} ve \texttt{EXTRACT()} gibi pencere ve agregat fonksiyonlarını kullanır.
     \item \textbf{Zaman bazlı filtreleme:} Heatmap ve belirli tarih sorguları doğrudan SQL \texttt{WHERE record\_time::date = \$1::date} koşuluyla veritabanında çözülür.
 \end{itemize}
 
@@ -577,7 +581,7 @@ $\hat{V}$ & Volume (Hacim) &
     Kümedeki ortalama araç sayısı; daha fazla araç = daha ciddi tıkanıklık &
     0.30 \\
 $\hat{S}$ & Speed Drop (Hız Düşüşü) & 
-    $1 - (\bar{v}_k / v_{\text{city}})$; İstanbul genel ortalaması 35~km/s.\ Hız sıfıra ne kadar yakınsa değer o kadar büyük.\ $[0,1]$'e kırpılır. &
+    $1 - (\bar{v}_k / v_{\text{city}})$; İstanbul genel ortalaması 35~km/h.\ Hız sıfıra ne kadar yakınsa değer o kadar büyük.\ $[0,1]$'e kırpılır. &
     0.30 \\
 $\hat{D}$ & Duration (Süreklilik) & 
     Kümedeki en geç ve en erken kayıt farkı (saat cinsinden). Uzun süreli tıkanıklık daha ciddi. &
@@ -633,24 +637,24 @@ Ocak 2025 verisi üzerinde çalıştırılan boru hattı 15 anomali kümesi tesp
 \end{tabular}
 \end{table}
 
-Yüksek AIS skorlu kümelerin (4 ve 0) ortak özellikleri dikkat çekicidir: her ikisi de İstanbul genelinin 35~km/s ortalamasının yarısının altında hıza (17--18~km/s) sahip, 600 saat üzerinde süre ve 18 farklı günde tekrarlama göstermektedir. Bu bulgular, söz konusu noktaların anlık değil yapısal tıkanıklık bölgeleri olduğuna işaret etmektedir.
+Yüksek AIS skorlu kümelerin (4 ve 0) ortak özellikleri dikkat çekicidir: her ikisi de İstanbul genelinin 35~km/h ortalamasının yarısının altında hıza (17--18~km/s) sahip, 600 saat üzerinde süre ve 18 farklı günde tekrarlama göstermektedir. Bu bulgular, söz konusu noktaların anlık değil yapısal tıkanıklık bölgeleri olduğuna işaret etmektedir.
 
 % ===========================================================================
 \section{Küme Doğrulama Metrikleri}
 % ===========================================================================
 
-Kümeleme sonuçlarının kalitesini değerlendirm için \texttt{clustering/validation.py} modülü üç farklı metrik ailesini hesaplamaktadır. Metriklerin uygulanmasından önce, tüm veri noktaları \textbf{normalize edilmiş bir uzay-zaman öznitelik matrisine} dönüştürülür; mekansal ve zamansal boyutlar kendi epsilon değerleriyle bölünerek eşit ağırlık kazanır:
+Kümeleme sonuçlarının kalitesini değerlendirmek için \texttt{clustering/validation.py} modülü üç farklı metrik ailesini hesaplamaktadır. Metriklerin uygulanmasından önce, tüm veri noktaları \textbf{normalize edilmiş bir zaman-uzamsal öznitelik matrisine} dönüştürülür; mekansal ve zamansal boyutlar kendi epsilon değerleriyle bölünerek eşit ağırlık kazanır:
 
 \begin{equation}
 d(i, j) = \sqrt{\left(\frac{\Delta\text{lat}}{\epsilon_1}\right)^2 + \left(\frac{\Delta\text{lon}}{\epsilon_1}\right)^2 + \left(\frac{\Delta t}{\epsilon_2}\right)^2}
 \label{eq:st-distance}
 \end{equation}
 
-\textbf{Silhouette Skoru:} Her noktanın kendi kümesiyle olan ortalama iç mesafesini ($a(i)$) diğer kümelere olan en küçük ortalama mesafeyle ($b(i)$) karşılaştırır. $[-1, 1]$ aralığında değer alır; 1'e yakın sonuçlar iyi ayrışmış kümeler anlamına gelir. 50.000 noktalık bir veri için tam Silhouette hesabı $O(n^2)$ sürer; bu nedenle 5.000 noktalık örneklem kullanılır.
+\textbf{Silhouette Skoru} \cite{silhouette}: Her noktanın kendi kümesiyle olan ortalama iç mesafesini ($a(i)$) diğer kümelere olan en küçük ortalama mesafeyle ($b(i)$) karşılaştırır. $[-1, 1]$ aralığında değer alır; 1'e yakın sonuçlar iyi ayrışmış kümeler anlamına gelir. 50.000 noktalık bir veri için tam Silhouette hesabı $O(n^2)$ sürer; bu nedenle 5.000 noktalık örneklem kullanılır.
 
-\textbf{Davies-Bouldin İndeksi (DBI):} Her küme çiftinin iç saçılımının küme merkezleri arası mesafeye oranını hesaplar; tüm çiftlerin ortalaması alınır. Düşük değer iyi küme ayrışmasını gösterir.
+\textbf{Davies-Bouldin İndeksi (DBI)} \cite{davies-bouldin}: Her küme çiftinin iç saçılımının küme merkezleri arası mesafeye oranını hesaplar; tüm çiftlerin ortalaması alınır. Düşük değer iyi küme ayrışmasını gösterir.
 
-\textbf{DBCV (Density-Based Cluster Validation):} Yoğunluk tabanlı kümeler için tasarlanmış özel bir metrik olup \texttt{hdbscan} kütüphanesi kuruluysa hesaplanır; aksi durumda atlanır.
+\textbf{DBCV (Density-Based Cluster Validation)} \cite{moulavi-dbcv}: Yoğunluk tabanlı kümeler için tasarlanmış özel bir metrik olup \texttt{hdbscan} kütüphanesi kuruluysa hesaplanır; aksi durumda atlanır.
 
 Parametre duyarlılık analizi (\texttt{--validate} bayrağı), önceden tanımlı altı $\{\epsilon_1, \epsilon_2, \text{MinPts}\}$ kombinasyonunu sırayla test ederek karşılaştırmalı metrik tablosu üretir. Bu tablo, seçilen parametrelerin alternatiflerinden neden farklı ve neden daha iyi olduğunu akademik gerekçelendirme için somut sayısal kanıt sağlar.
 
@@ -711,7 +715,7 @@ Data \& Knowledge Engineering, 60(1), 208--221.
 \url{https://doi.org/10.1016/j.datak.2006.01.013}
 
 \bibitem{springer-book}
-Zimányi, E., Bakli, M.\ \& others (2025).
+Zimányi, E., Bakli, M.\ et~al. (2025).
 \textit{Mobility Data Management and Analysis.}
 Springer. ISBN 978-3-031-82635-1.
 \url{https://link.springer.com/book/10.1007/978-3-031-82636-8}

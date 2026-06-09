@@ -26,10 +26,6 @@ from backend.app.models.cluster import (
 
 logger = logging.getLogger(__name__)
 
-# ── Clustering Parameters (metric, EPSG:32636) ────────────────────────────
-_EPS_METERS = 500.0
-_MINPOINTS = 3
-
 # ── Cache ──────────────────────────────────────────────────────────────────
 _cache: dict = {}
 _CACHE_TTL = 60
@@ -85,10 +81,13 @@ async def get_cluster_summaries() -> list[dict]:
     ST_ClusterDBSCAN window function. Cluster centroids are computed from the
     collected geometries and transformed back to WGS84 for frontend display.
     """
+    settings = get_settings()
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            _CLUSTER_SUMMARY_SQL, _EPS_METERS, _MINPOINTS
+            _CLUSTER_SUMMARY_SQL,
+            settings.dbscan_eps_meters,
+            settings.dbscan_minpoints,
         )
     return [dict(r) for r in rows]
 

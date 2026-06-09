@@ -30,15 +30,25 @@ DB_CONFIG = {
 # Async DSN for asyncpg (FastAPI backend)
 DATABASE_URL = settings.database_url
 
+# ─── PostGIS ST_ClusterDBSCAN Parameters ──────────────────────────────────
+# Geometry column is EPSG:32636 (UTM Zone 36N), so eps is in metres.
+EPS_METERS = settings.dbscan_eps_meters
+MINPTS = settings.dbscan_minpoints
 
+# ─── Congestion Candidate Filter Thresholds ───────────────────────────────
+# Static baseline filter applied before clustering.
+# Records below this speed AND above this vehicle count are candidates.
+HIGH_CONGESTION_MAX_AVG_SPEED = settings.high_congestion_max_avg_speed
+HIGH_CONGESTION_MIN_VEHICLE_COUNT = settings.high_congestion_min_vehicle_count
 
-# ─── ST_ClusterDBSCAN Parameters (PostGIS-native, metric) ─────────────────
-EPS_METERS = 500.0        # spatial epsilon in metres (EPSG:32636 = metric)
-MINPTS = 3                # minimum points to form a core
+# ─── Geohash Cell Density Prototype ───────────────────────────────────────
+# Area-based approximation only. Not road-length-aware.
+DENSITY_FILTER_ENABLED = settings.density_filter_enabled
+DENSITY_PERCENTILE_THRESHOLD = settings.density_percentile_threshold
 
 # ─── AIS (Anomaly Intensity Score) Weights ─────────────────────────────────
 AIS_WEIGHTS = settings.ais_weights
-CITY_AVG_SPEED_KMH = 35.0  # Istanbul citywide average (baseline)
+CITY_AVG_SPEED_KMH = 35.0  # Istanbul citywide average speed (km/h) baseline
 
 # ─── Data Paths ────────────────────────────────────────────────────────────
 CSV_DIR = PROJECT_ROOT / "ibb_trafik_verileri"
@@ -49,7 +59,7 @@ BATCH_SIZE = 10_000
 
 
 def ensure_cli_logging() -> None:
-    """If the root logger has no handlers, emit INFO on stdout (same stream as print)."""
+    """If the root logger has no handlers, emit INFO on stdout."""
     root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(

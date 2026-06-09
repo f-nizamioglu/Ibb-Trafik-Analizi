@@ -1,129 +1,167 @@
-# 🚗 İstanbul Trafik Anomali Analizi (ST-DBSCAN)
+# İstanbul Trafik Anomali Analizi
 
-Bu proje, İstanbul'da meydana gelen trafik anomalilerini tespit etmek, derecelendirmek ve harita üzerinde görselleştirmek için **ST-DBSCAN** (Uzamsal-Zamansal yoğunluk tabanlı kümeleme) ve **Anomali Şiddet Skorlaması (AIS)** kullanan yüksek performanslı bir analiz sistemidir.
+İstanbul Büyükşehir Belediyesi (İBB) Açık Veri Portalı'ndan alınan saatlik trafik yoğunluk verileri üzerinde mekansal anomali tespiti, kümeleme ve görselleştirme sistemi.
 
-Proje, raw (ham) İBB verisinin sisteme aktarılmasından, OSRM ile harita eşleştirmesine (map matching), oradan FastAPI tabanlı arka uca ve en son olarak Leaflet.js tabanlı etkileşimli bir ön uca (frontend) kadar Uçtan Uca (End-to-End) bir mimari barındırır.
-
----
-
-## 🌟 Temel Özellikler
-
--   **ST-DBSCAN Kümeleme**: Spesifik bir lokasyonda uzun süre devam eden trafik tıkanıklıklarını (anomalileri) tespit eden uzamsal-zamansal (spatio-temporal) kümeleme algoritması.
--   **BallTree Optimizasyonu**: Scikit-learn'ün BallTree veri yapısı kullanılarak büyük veri kümeleri (1.7M+ satır) üzerinde mesafe matrisi oluşturmadan hafıza ve hız optimizasyonu.
--   **Anomali Şiddet Skoru (AIS - Anomaly Intensity Score)**: Kümeleri büyüklüklerine, etkinlik sürelerine ve hız düşüşlerine göre kritiklik seviyelerine (LOW, MEDIUM, HIGH) ayıran özel skorlama motoru.
--   **Geo-Bölümleme (Partitioning)**: Makine öğrenmesi pipeline'ını devasa veriler üzerinde daha stabil çalıştırmak için Geohash tabanlı bölgesel hesaplama yeteneği (Map-Reduce).
--   **İnteraktif Görselleştirme**: Leaflet.js kullanılarak geliştirilmiş, anomali kümelerinin detaylarını harita üzerinde interaktif olarak sunan modern ön yüz.
--   **OSRM (Open Source Routing Machine) Entegrasyonu**: Ham koordinatların en yakın "sürülebilir yol ağına" oturtulmasını sağlayan sistem (Map Snapping).
--   **Docker Uyumluluğu**: PostgreSQL/PostGIS, OSRM ve uygulamanın kolayca ayağa kalkabilmesi için tam konteyner (container) desteği.
+Bu proje aynı zamanda bir bilgisayar mühendisliği tez çalışmasının parçasıdır.
 
 ---
 
-## 🛠️ Teknoloji Yığını
+## Metodoloji
+
+**PostGIS Tabanlı Mekansal DBSCAN ve Zamansal Tekrarlılık Analizi**
+
+Bu sistem, Birant & Kut (2007) ST-DBSCAN algoritmasının tam uygulaması değildir. Temporal epsilon (ε₂) komşuluk mantığı, kümeleme aşamasında uygulanmamaktadır. Bunun yerine:
+
+- PostgreSQL/PostGIS içinde `ST_ClusterDBSCAN` pencere fonksiyonu ile mekansal DBSCAN kümeleme (EPSG:32636 metrik geometri üzerinde, eps metre cinsinden)
+- Kümeleme sonrası zamansal tekrarlılık ve süre analizi (AIS bileşenleri üzerinden)
+- Çok kriterli Anomali Yoğunluk Skoru (AIS) hesabı: Hacim %30, Hız Düşüşü %30, Süre %25, Tekrarlılık %15
+
+| Kavram | Açıklama | Bu projede mi? |
+|--------|----------|---------------|
+| DBSCAN | Yoğunluk tabanlı mekansal kümeleme | Kavramsal olarak evet |
+| ST-DBSCAN | Mekansal + zamansal epsilon ile kümeleme | Tam uygulanmadı |
+| PostGIS `ST_ClusterDBSCAN` | Geometri üzerinde mekansal DBSCAN | Evet |
+| Proje boru hattı | Mekansal DBSCAN + zamansal tekrarlılık + AIS | Evet |
+
+---
+
+## Teknoloji
 
 | Katman | Teknolojiler |
-| :--- | :--- |
-| **Veri Bilimi (Data Science)** | Python 3.10+, Pandas, NumPy, Scikit-learn (BallTree) |
-| **Veritabanı** | PostgreSQL 16+, PostGIS 3.4+ |
-| **Arka Uç (Backend)** | FastAPI, Uvicorn, Asyncpg, Pydantic |
-| **Ön Uç (Frontend)** | Vanilla JavaScript, Leaflet.js |
-| **Altyapı** | Docker, Docker Compose, OSRM |
+|--------|-------------|
+| Veritabanı | PostgreSQL 16+, PostGIS 3.4+ (MobilityDB Docker imajı) |
+| Veri İşleme | Python 3.10+, Pandas, NumPy |
+| Backend | FastAPI, Uvicorn, asyncpg, Pydantic |
+| Frontend | Vanilla JavaScript, Leaflet.js |
+| Altyapı | Docker, Docker Compose |
+
+**Not:** MobilityDB, Docker imajı aracılığıyla kullanılabilir durumdadır ancak mevcut boru hattında aktif olarak kullanılmamaktadır. OSRM harita eşleştirmesi bu boru hattında aktif değildir.
 
 ---
 
-## 🏗️ Sistem Mimarisi
+## Kurulum
 
-```mermaid
-graph TD
-    A[İBB Açık Veri Portalı] -->|Python Veri Çekme| B(Veri Aktarımı)
-    B -->|Toplu SQL COPY| C[(PostGIS Veritabanı)]
-    C -->|high_congestion_zones Filtresi| D[ST-DBSCAN Boru Hattı]
-    D -->|Kümeleme ve AIS Skorlama| C
-    C -->|GeoJSON Dönüşümü| E[FastAPI Arka Ucu]
-    E -->|REST API| F[Leaflet.js Ekranı]
-    F -->|Görsel Etkileşim| G((Kullanıcı))
-    
-    subgraph "İşleme Katmanı (Processing)"
-        D
-    end
-    
-    subgraph "Depolama Katmanı (Storage)"
-        C
-    end
-```
-
----
-
-## 🚀 Başlangıç & Kurulum
-
-### 1. Ön Koşullar
-- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
-- Pipeline'ı yerel çalıştırmak için [Python 3.10+](https://www.python.org/)
-
-### 2. Çevre Değişkenleri (Environment)
-Projeyi klonlayın ve kök dizinde `.env` isimli dosyanızı oluşturun:
 ```bash
+# 1. Çevre değişkenleri
 cp .env.example .env
-# İçerisine PostgreSQL giriş bilgilerinizi tanımlayın.
-```
+# .env dosyasına veritabanı giriş bilgilerini girin
 
-### 3. Hızlı Başlangıç (Docker ile)
-PostgreSQL dahil gerekli sunucuların otomatik kurulması için:
-```bash
-docker-compose up -d
-```
-
-### 4. Makine Öğrenmesi Akışını Çalıştırmak
-Veritabanına eklenen verileri işleyip trafik kümelerini oluşturmak için:
-```bash
-# Bağımlılıkları yükleyin
+# 2. Bağımlılıklar
 pip install -r requirements.txt
 
-# Temel ST-DBSCAN algoritmasını başlat
-python run_pipeline.py
-
-# Eğer veri çok büyükse yatay ölçeklendirmeli modül için
-python run_pipeline.py --partitioned
+# 3. Veritabanı (Docker)
+docker-compose up -d
+# PostgreSQL/PostGIS, localhost:5433 üzerinde başlar
 ```
 
 ---
 
-## 📂 Dizin Yapısı Merkezi
+## Boru Hattı
 
--   `backend/`: FastAPI uygulaması, veritabanı iletişimi, servis mimarisi ve API uçları (routers).
--   `clustering/`: Çekirdek ST-DBSCAN implementasyonu, BallTree optimizasyonu ve Geohash-partition algoritması.
--   `frontend/`: Basit, tek dosyalık interaktif Leaflet.js ekranı (`index.html`).
--   `map_matching/`: OSRM yerel sunucusuna bağlanarak koordinatları gerçek yollara "oturtma" işlemleri.
--   `scoring/`: Üretilen kümelere önem dereceleri (LOW, MEDIUM, HIGH) belirleyen Anomaly Intensity Score (AIS) modülü.
--   `ingest_data.py`: Ham İBB verilerini okuyarak PostGIS üzerine geometrik veri (`GEOMETRY`) yapısıyla ekleyen yama.
--   `run_pipeline.py`: Tüm işlemleri uçtan uca kontrol edip tetikleyen ana makine öğrenmesi yöneticisi.
+Aşağıdaki sırayla çalıştırılır:
 
----
+```bash
+# Aşama 1: İBB portalından CSV indir
+python download_data.py
 
-## 📚 Detaylı Mühendislik ve Teknik Analiz Belgesi
+# Aşama 2-3: CSV'yi PostgreSQL/PostGIS'e aktar (EPSG:32636 metrik geometri)
+python ingest_data.py
 
-Eğer bu projenin arkasında yatan yazılım mühendisliği tasarımlarını, $O(n^2)$ karmaşıklığından BallTree optimizasyonuyla kurtulma matematiğini, `LRU Cache` mekaniğini ve dosya-dosya modüllerin ne işe yaradığını tam olarak anlamak isterseniz (veya yapay zeka ajanlarına bu proje üzerinden bir mimari iş yaptıracaksanız), lütfen **[ENGINEERING_DOCS.md](ENGINEERING_DOCS.md)** dosyasını okuyun. O doküman projede akılda kalabilecek hiçbir soru işareti bırakmayacaktır.
+# Aşama 4: Tıkanıklık aday filtresi + mekansal indeksler
+python create_views.py
 
----
+# Aşama 5-7: Mekansal DBSCAN kümeleme + zamansal analiz + AIS skorlama
+python run_pipeline.py
+```
 
-## 📡 API Uç Noktaları (Endpoints)
+### Boru Hattı Aşamaları
 
--   `GET /api/health`: Sistem servis durumu sorgulama.
--   `GET /api/clusters`: Otomatik olarak tespit edilen tüm trafik anomalilerini `GeoJSON FeatureCollection` olarak getirir.
--   `GET /docs`: Etkileşimli Swagger UI dokümantasyonu arayüzüne giriş noktası.
-
----
-
-## 📈 Metodoloji: ST-DBSCAN ve AIS Skoru
-
-Bu projede uygulanan özel ST-DBSCAN yaklaşımı üç temel parametreye dayanır:
--   **Eps1 (Uzamsal/Mekansal Hata Payı)**: Metre cinsindendir, max mesafe.
--   **Eps2 (Zamansal Eşik)**: Saniye cinsindendir, noktalar arası maksimum zaman farklılığı.
--   **MinPts**: Bir kümenin "anomali" sayılabilmesi için içermesi gereken asgari nokta adedi.
-
-**Anomali Şiddet Skoru (AIS - Anomaly Intensity Score)** ise kabaca şu ilkeye dayanır:
-$$AIS= \frac{N_{NoktaSayısı} \times \text{SüreklilikZamanı}}{\text{OrtalamaHız}}$$
-Şehir yöneticilerinin müdahale etmesi gereken asıl kritik tıkanıklıklar AIS puanı en yüksek olan ("HIGH") alanlardır.
+| Aşama | Betik | Açıklama |
+|-------|-------|----------|
+| 1 | `download_data.py` | İBB portali scraping, CSV indirme |
+| 2 | `ingest_data.py` | CSV → PostgreSQL, EPSG:32636 geometri dönüşümü |
+| 3 | `create_views.py` | GiST mekansal indeks |
+| 4 | `create_views.py` | `high_congestion_zones` VIEW (statik taban filtresi) |
+| 5 | `run_pipeline.py` | PostGIS `ST_ClusterDBSCAN` mekansal kümeleme |
+| 6 | `run_pipeline.py` | Zamansal tekrarlılık/süre analizi (AIS bileşeni) |
+| 7 | `run_pipeline.py` | AIS skorlama + `cluster_scores.csv` çıktısı |
+| 8 | `uvicorn ...` | FastAPI REST API |
+| 9 | `index.html` | Leaflet.js görselleştirme |
 
 ---
 
-*Proje Geliştiricisi: [Fikrat Nizamioglu](https://github.com/f-nizamioglu)*
+## API Sunucusunu Başlatma
+
+```bash
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+- Arayüz: `http://localhost:8000`
+- API Belgelendirme: `http://localhost:8000/docs`
+
+---
+
+## API Uç Noktaları
+
+| Uç Nokta | Açıklama |
+|----------|----------|
+| `GET /api/clusters` | Tüm anomali kümelerini GeoJSON olarak döner |
+| `GET /api/clusters?severity=HIGH` | Seviyeye göre filtreli kümeler |
+| `GET /api/clusters/{id}` | Tek küme detayı |
+| `GET /api/stats` | Genel istatistikler |
+| `GET /api/heatmap` | Nokta yoğunluğu; `?date=YYYY-MM-DD` ile filtreli |
+| `GET /api/health` | Servis canlılık kontrolü |
+
+---
+
+## Deneyler
+
+```bash
+# Parametre duyarlılık analizi
+python experiments/parameter_sensitivity.py
+
+# Geohash hücre yoğunluk prototipi (alan tabanlı yaklaşım, deneysel)
+python experiments/dynamic_density.py
+
+# Grafik üretimi (CSV çıktısı gerektirir)
+python experiments/generate_charts.py
+```
+
+---
+
+## Testler
+
+```bash
+pip install pytest httpx  # geliştirme bağımlılıkları
+python -m pytest tests/ -v
+```
+
+---
+
+## Dizin Yapısı
+
+```
+.
+├── backend/app/          FastAPI uygulaması, rotalar, servisler, modeller
+├── experiments/          Parametre duyarlılık ve yoğunluk prototip deneyleri
+├── legacy/               Arşivlenmiş eski Python tabanlı implementasyon
+├── outputs/experiments/  Deney CSV ve MD çıktıları (.gitignore hariç)
+├── scoring/              AIS (Anomali Yoğunluk Skoru) motoru
+├── tests/                pytest test paketi
+├── config.py             Merkezi yapılandırma (.env üzerinden)
+├── create_views.py       Mekansal indeks + aday filtre VIEW
+├── download_data.py      İBB portal scraping
+├── ingest_data.py        CSV → PostGIS aktarımı
+├── index.html            Leaflet.js harita arayüzü
+└── run_pipeline.py       Ana boru hattı orkestratörü
+```
+
+---
+
+## Kısıtlamalar
+
+- Tam ε₂ tabanlı ST-DBSCAN uygulanmamıştır; zamansal boyut kümeleme sonrası AIS aracılığıyla ele alınmaktadır.
+- MobilityDB Docker imajı üzerinden kullanılabilir durumdadır; ancak aktif boru hattında MobilityDB fonksiyonları kullanılmamaktadır.
+- OSRM harita eşleştirmesi mevcut boru hattında aktif değildir.
+- Geohash yoğunluk filtresi deneysel prototip seviyesindedir ve alan tabanlı yaklaşıma dayanmaktadır. Yol uzunluğu tabanlı gerçek yoğunluk için yol ağı verisi (OSM) gerekmektedir.
+- Parametre deneyleri (`experiments/`) veritabanının çalışır durumda ve verisinin yüklenmiş olmasını gerektirmektedir.

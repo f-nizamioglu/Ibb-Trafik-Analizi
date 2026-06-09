@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Istanbul Traffic Anomaly API",
     description=(
-        "RESTful API serving ST-DBSCAN clustered traffic anomaly data "
+        "RESTful API serving PostGIS spatial DBSCAN clustered traffic anomaly data "
         "from IBB (Istanbul Municipality) open data. "
         "Designed for consumption by a Leaflet.js frontend."
     ),

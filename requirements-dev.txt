@@ -1,0 +1,4 @@
+# Development and experiment dependencies
+pytest>=8.0
+httpx>=0.27         # FastAPI test client
+matplotlib>=3.8     # experiment chart generation
