@@ -1,0 +1,305 @@
+Schema ready (ibb_traffic_density + ingested_files)
+Found 61 CSV file(s) to process
+  Ingesting traffic_density_202001.csv (period=2020-01, 134.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,676,399 rows in 58.8s (0 invalid rows skipped), date range 2020-01-01 – 2020-01-31
+  Ingesting traffic_density_202002.csv (period=2020-02, 110.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+  Done: 1,494,436 rows in 49.7s (0 invalid rows skipped), date range 2020-02-01 – 2020-02-28
+  Ingesting traffic_density_202003.csv (period=2020-03, 125.7 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,696,021 rows in 62.4s (0 invalid rows skipped), date range 2020-03-01 – 2020-03-31
+  Ingesting traffic_density_202004.csv (period=2020-04, 118.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,597,784 rows in 58.3s (0 invalid rows skipped), date range 2020-04-01 – 2020-04-30
+  Ingesting traffic_density_202005.csv (period=2020-05, 123.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,669,074 rows in 67.9s (0 invalid rows skipped), date range 2020-05-01 – 2020-05-31
+  Ingesting traffic_density_202006.csv (period=2020-06, 112.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,513,332 rows in 62.8s (0 invalid rows skipped), date range 2020-06-01 – 2020-06-30
+  Ingesting traffic_density_202007.csv (period=2020-07, 127.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,715,687 rows in 70.2s (0 invalid rows skipped), date range 2020-07-01 – 2020-07-31
+  Ingesting traffic_density_202008.csv (period=2020-08, 126.7 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,708,815 rows in 67.0s (0 invalid rows skipped), date range 2020-08-01 – 2020-08-31
+  Ingesting traffic_density_202009.csv (period=2020-09, 122.9 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,657,972 rows in 71.7s (0 invalid rows skipped), date range 2020-09-01 – 2020-09-30
+  Ingesting traffic_density_202010.csv (period=2020-10, 126.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,707,499 rows in 68.8s (0 invalid rows skipped), date range 2020-10-01 – 2020-10-31
+  Ingesting traffic_density_202011.csv (period=2020-11, 118.4 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,597,739 rows in 70.7s (0 invalid rows skipped), date range 2020-11-01 – 2020-11-30
+  Ingesting traffic_density_202012.csv (period=2020-12, 125.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,691,158 rows in 75.7s (0 invalid rows skipped), date range 2020-12-01 – 2020-12-31
+  Ingesting traffic_density_202101.csv (period=2021-01, 124.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,676,071 rows in 73.1s (0 invalid rows skipped), date range 2021-01-01 – 2021-01-31
+  Ingesting traffic_density_202102.csv (period=2021-02, 111.9 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,511,950 rows in 68.8s (0 invalid rows skipped), date range 2021-02-01 – 2021-02-28
+  Ingesting traffic_density_202103.csv (period=2021-03, 125.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,692,055 rows in 69.9s (0 invalid rows skipped), date range 2021-03-01 – 2021-03-31
+  Ingesting traffic_density_202104.csv (period=2021-04, 117.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,583,100 rows in 71.4s (0 invalid rows skipped), date range 2021-04-01 – 2021-04-30
+  Ingesting traffic_density_202105.csv (period=2021-05, 124.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,675,702 rows in 74.9s (0 invalid rows skipped), date range 2021-05-01 – 2021-05-31
+  Ingesting traffic_density_202106.csv (period=2021-06, 100.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+  Done: 1,351,493 rows in 60.5s (0 invalid rows skipped), date range 2021-06-01 – 2021-06-30
+  Ingesting traffic_density_202107.csv (period=2021-07, 128.4 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,732,046 rows in 81.0s (0 invalid rows skipped), date range 2021-07-01 – 2021-07-31
+  Ingesting traffic_density_202108.csv (period=2021-08, 129.7 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,749,429 rows in 80.9s (0 invalid rows skipped), date range 2021-08-01 – 2021-08-31
+  Ingesting traffic_density_202109.csv (period=2021-09, 124.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,677,111 rows in 85.0s (0 invalid rows skipped), date range 2021-09-01 – 2021-09-30
+  Ingesting traffic_density_202110.csv (period=2021-10, 124.6 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,681,477 rows in 84.8s (0 invalid rows skipped), date range 2021-10-01 – 2021-10-31
+  Ingesting traffic_density_202111.csv (period=2021-11, 125.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,688,559 rows in 80.1s (0 invalid rows skipped), date range 2021-11-01 – 2021-11-30
+  Ingesting traffic_density_202112.csv (period=2021-12, 127.9 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,726,862 rows in 88.9s (0 invalid rows skipped), date range 2021-12-01 – 2021-12-31
+  Ingesting traffic_density_202201.csv (period=2022-01, 126.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,712,770 rows in 82.3s (0 invalid rows skipped), date range 2022-01-01 – 2022-01-31
+  Ingesting traffic_density_202202.csv (period=2022-02, 116.0 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,566,682 rows in 76.7s (0 invalid rows skipped), date range 2022-02-01 – 2022-02-28
+  Ingesting traffic_density_202203.csv (period=2022-03, 129.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,744,335 rows in 81.2s (0 invalid rows skipped), date range 2022-03-01 – 2022-03-31
+  Ingesting traffic_density_202204.csv (period=2022-04, 118.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,595,797 rows in 78.8s (0 invalid rows skipped), date range 2022-04-01 – 2022-04-30
+  Ingesting traffic_density_202205.csv (period=2022-05, 124.4 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,677,948 rows in 78.4s (0 invalid rows skipped), date range 2022-05-01 – 2022-05-31
+  Ingesting traffic_density_202206.csv (period=2022-06, 109.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+  Done: 1,472,550 rows in 75.3s (0 invalid rows skipped), date range 2022-06-01 – 2022-06-30
+  Ingesting traffic_density_202207.csv (period=2022-07, 129.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,746,679 rows in 84.9s (0 invalid rows skipped), date range 2022-07-01 – 2022-07-31
+  Ingesting traffic_density_202208.csv (period=2022-08, 130.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,759,804 rows in 88.4s (0 invalid rows skipped), date range 2022-08-01 – 2022-08-31
+  Ingesting traffic_density_202209.csv (period=2022-09, 125.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,696,925 rows in 77.2s (0 invalid rows skipped), date range 2022-09-01 – 2022-09-30
+  Ingesting traffic_density_202210.csv (period=2022-10, 125.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,689,622 rows in 88.1s (0 invalid rows skipped), date range 2022-10-01 – 2022-10-31
+  Ingesting traffic_density_202211.csv (period=2022-11, 124.3 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,677,167 rows in 83.1s (0 invalid rows skipped), date range 2022-11-01 – 2022-11-30
+  Ingesting traffic_density_202212.csv (period=2022-12, 128.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,729,132 rows in 88.7s (0 invalid rows skipped), date range 2022-12-01 – 2022-12-31
+  Ingesting traffic_density_202301.csv (period=2023-01, 128.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,737,740 rows in 89.6s (0 invalid rows skipped), date range 2023-01-01 – 2023-01-31
+  Ingesting traffic_density_202302.csv (period=2023-02, 116.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,576,068 rows in 84.9s (0 invalid rows skipped), date range 2023-02-01 – 2023-02-28
+  Ingesting traffic_density_202303.csv (period=2023-03, 124.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,679,947 rows in 85.5s (0 invalid rows skipped), date range 2023-03-01 – 2023-03-31
+  Ingesting traffic_density_202304.csv (period=2023-04, 119.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,611,921 rows in 86.1s (0 invalid rows skipped), date range 2023-04-01 – 2023-04-30
+  Ingesting traffic_density_202305.csv (period=2023-05, 119.0 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,604,158 rows in 88.8s (0 invalid rows skipped), date range 2023-05-01 – 2023-05-31
+  Ingesting traffic_density_202306.csv (period=2023-06, 118.7 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,600,837 rows in 85.4s (0 invalid rows skipped), date range 2023-06-01 – 2023-06-30
+  Ingesting traffic_density_202307.csv (period=2023-07, 122.5 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,653,404 rows in 91.4s (0 invalid rows skipped), date range 2023-07-01 – 2023-07-31
+  Ingesting traffic_density_202308.csv (period=2023-08, 113.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,526,798 rows in 86.7s (0 invalid rows skipped), date range 2023-08-01 – 2023-08-31
+  Ingesting traffic_density_202309.csv (period=2023-09, 121.6 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,640,769 rows in 88.5s (0 invalid rows skipped), date range 2023-09-01 – 2023-09-30
+  Ingesting traffic_density_202310.csv (period=2023-10, 115.4 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,558,411 rows in 89.2s (0 invalid rows skipped), date range 2023-10-01 – 2023-10-31
+  Ingesting traffic_density_202311.csv (period=2023-11, 112.9 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,524,215 rows in 92.6s (0 invalid rows skipped), date range 2023-11-01 – 2023-11-29
+  Ingesting traffic_density_202312.csv (period=2023-12, 113.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,528,665 rows in 94.8s (0 invalid rows skipped), date range 2023-12-01 – 2023-12-31
+  Ingesting traffic_density_202401.csv (period=2024-01, 71.0 MB)…
+    … 500,000 rows inserted
+  Done: 957,453 rows in 60.0s (0 invalid rows skipped), date range 2024-01-01 – 2024-01-31
+  Ingesting traffic_density_202402.csv (period=2024-02, 118.7 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,597,848 rows in 97.1s (0 invalid rows skipped), date range 2024-02-01 – 2024-02-29
+  Ingesting traffic_density_202403.csv (period=2024-03, 129.6 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,745,209 rows in 101.9s (0 invalid rows skipped), date range 2024-03-01 – 2024-03-31
+  Ingesting traffic_density_202404.csv (period=2024-04, 119.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,613,448 rows in 115.8s (0 invalid rows skipped), date range 2024-04-01 – 2024-04-30
+  Ingesting traffic_density_202405.csv (period=2024-05, 123.4 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,659,879 rows in 103.0s (0 invalid rows skipped), date range 2024-05-01 – 2024-05-31
+  Ingesting traffic_density_202406.csv (period=2024-06, 114.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,546,301 rows in 105.2s (0 invalid rows skipped), date range 2024-06-01 – 2024-06-30
+  Ingesting traffic_density_202407.csv (period=2024-07, 142.7 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,777,494 rows in 125.6s (0 invalid rows skipped), date range 2024-07-01 – 2024-07-31
+  Ingesting traffic_density_202408.csv (period=2024-08, 138.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,720,457 rows in 110.0s (0 invalid rows skipped), date range 2024-08-01 – 2024-08-31
+  Ingesting traffic_density_202409.csv (period=2024-09, 137.8 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,716,507 rows in 109.9s (0 invalid rows skipped), date range 2024-09-01 – 2024-09-30
+  Ingesting traffic_density_202410.csv (period=2024-10, 142.1 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,769,643 rows in 112.9s (0 invalid rows skipped), date range 2024-10-01 – 2024-10-31
+  Ingesting traffic_density_202411.csv (period=2024-11, 137.2 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+    … 1,500,000 rows inserted
+  Done: 1,710,138 rows in 108.6s (0 invalid rows skipped), date range 2024-11-01 – 2024-11-30
+  Ingesting traffic_density_202412.csv (period=2024-12, 101.6 MB)…
+    … 500,000 rows inserted
+    … 1,000,000 rows inserted
+  Done: 1,266,396 rows in 83.0s (0 invalid rows skipped), date range 2024-12-01 – 2024-12-31
+  SKIP traffic_density_202501.csv (period=2025-01, already ingested)
+
+==================================================
+Ingestion summary:
+  Files found:     61
+  Ingested:        60
+  Skipped:         1
+  Failed:          0
+  New rows added:  97,864,888
