@@ -93,7 +93,7 @@ def chart_threshold_impact(rows: list[dict]) -> Path:
     out = OUTPUT_DIR / "threshold_impact.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    logger.info(f"  threshold_impact.png → {out}")
+    logger.info(f"  threshold_impact.png -> {out}")
     return out
 
 
@@ -138,7 +138,7 @@ def chart_eps_minpoints_impact(rows: list[dict]) -> Path:
     out = OUTPUT_DIR / "eps_minpoints_impact.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    logger.info(f"  eps_minpoints_impact.png → {out}")
+    logger.info(f"  eps_minpoints_impact.png -> {out}")
     return out
 
 
@@ -162,7 +162,7 @@ def chart_runtime(rows: list[dict]) -> Path:
     out = OUTPUT_DIR / "runtime_comparison.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    logger.info(f"  runtime_comparison.png → {out}")
+    logger.info(f"  runtime_comparison.png -> {out}")
     return out
 
 
@@ -190,7 +190,7 @@ def chart_density_comparison(rows: list[dict]) -> Path:
     out = OUTPUT_DIR / "density_filter_comparison.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    logger.info(f"  density_filter_comparison.png → {out}")
+    logger.info(f"  density_filter_comparison.png -> {out}")
     return out
 
 
