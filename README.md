@@ -137,12 +137,28 @@ uvicorn backend.app.main:app --reload --port 8000
 
 | Uç Nokta | Açıklama |
 |----------|----------|
-| `GET /api/clusters` | Tüm anomali kümelerini GeoJSON olarak döner |
-| `GET /api/clusters?severity=HIGH` | Seviyeye göre filtreli kümeler |
+| `GET /api/clusters` | Eski toplulaştırılmış AIS tabanlı kümeleri GeoJSON olarak döner |
+| `GET /api/clusters?severity=HIGH` | Eski toplulaştırılmış kümeleri seviyeye göre filtreler |
+| `GET /api/clusters?date=YYYY-MM-DD&hour=HH` | Seçilen tarih ve saat için saatlik hız tabanlı trafik yoğunluğu kümelerini döner |
+| `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Saatlik kümeleri `HIGH`, `MEDIUM` veya `LOW` seviyesine göre filtreler |
 | `GET /api/clusters/{id}` | Tek küme detayı |
 | `GET /api/stats` | Genel istatistikler |
 | `GET /api/heatmap` | Nokta yoğunluğu; `?date=YYYY-MM-DD` ile filtreli |
 | `GET /api/health` | Servis canlılık kontrolü |
+
+### Saatlik Temporal Kümeleme Modu
+
+Arayüzün kullandığı ana sorgu biçimi:
+
+```text
+/api/clusters?date=2025-01-17&hour=18
+```
+
+- `date` değeri `YYYY-MM-DD` biçiminde olmalı ve veri aralığı olan `2020-01-01` ile `2025-01-31` arasında seçilmelidir.
+- `hour` değeri 0-23 arasında bir tam sayı olmalıdır.
+- `severity` isteğe bağlıdır ve `HIGH`, `MEDIUM` veya `LOW` olabilir.
+- Temporal mod tek bir saatlik kesit üzerinde PostGIS mekansal DBSCAN çalıştırır.
+- Temporal moddaki yoğunluk düzeyi AIS skoruna değil, seçilen saat içindeki ortalama hıza dayalıdır.
 
 ---
 

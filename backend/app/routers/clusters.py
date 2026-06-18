@@ -2,34 +2,54 @@
 Cluster API endpoints — GeoJSON responses for Leaflet.js.
 
 Endpoints:
-    GET /api/clusters              → All clusters as GeoJSON FeatureCollection
-    GET /api/clusters/{cluster_id} → Single cluster detail
-    GET /api/clusters?severity=HIGH → Filter by severity
-    GET /api/stats                  → Global statistics
+    GET /api/clusters                                  → Historical aggregate clusters
+    GET /api/clusters?date=YYYY-MM-DD&hour=HH          → Temporal (hourly) clusters
+    GET /api/clusters?date=...&hour=...&severity=HIGH   → Temporal + severity filter
+    GET /api/clusters/{cluster_id}                      → Single cluster detail
+    GET /api/stats                                      → Global statistics
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.app.limiter import limiter
-from backend.app.models.cluster import GeoJSONFeatureCollection, StatsResponse
+from backend.app.models.cluster import (
+    GeoJSONFeatureCollection,
+    StatsResponse,
+    TemporalClusterResponse,
+)
 from backend.app.services.cluster_service import (
     build_geojson,
     compute_ais_and_severity,
     get_cached_cluster_summaries,
     get_global_stats,
+    get_temporal_clusters,
 )
 
 router = APIRouter()
 
 
-@router.get("/clusters", response_model=GeoJSONFeatureCollection)
-@limiter.limit("30/minute")
+@router.get(
+    "/clusters",
+    response_model=Union[TemporalClusterResponse, GeoJSONFeatureCollection],
+)
+@limiter.limit("60/minute")
 async def list_clusters(
     request: Request,
+    date: Optional[str] = Query(
+        None,
+        description="Date filter (YYYY-MM-DD). Requires 'hour' parameter.",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    ),
+    hour: Optional[int] = Query(
+        None,
+        description="Hour of day (0-23). Requires 'date' parameter.",
+        ge=0,
+        le=23,
+    ),
     severity: Optional[str] = Query(
         None,
         description="Filter by severity level: LOW, MEDIUM, or HIGH",
@@ -37,14 +57,68 @@ async def list_clusters(
     ),
 ):
     """
-    Get all traffic anomaly clusters as a GeoJSON FeatureCollection.
+    Get traffic anomaly clusters as GeoJSON.
 
-    Each Feature contains:
-    - geometry: centroid Point
-    - properties: AIS score, severity, metrics, peak time
+    **Temporal mode** (date + hour provided):
+    Runs live PostGIS ST_ClusterDBSCAN on the selected hour slice from
+    ibb_traffic_density. Uses hourly-tuned parameters (eps=1000m,
+    minpoints=2, avg_speed<25). Severity is speed-based, not AIS-based.
 
-    Leaflet usage: `L.geoJSON(data).addTo(map)`
+    **Legacy mode** (no date/hour):
+    Returns cached historical aggregate clusters with AIS scoring.
+    Kept for backward compatibility.
     """
+    # ── Temporal mode ─────────────────────────────────────────────────
+    if date is not None and hour is not None:
+        try:
+            result = await get_temporal_clusters(date, hour)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if severity:
+            sev_upper = severity.upper()
+            result.features = [
+                f for f in result.features
+                if f.properties.severity == sev_upper
+            ]
+            result.cluster_count = len(result.features)
+            # Recompute summary stats after filtering
+            result.total_points = sum(
+                f.properties.point_count for f in result.features
+            )
+            result.total_vehicles = sum(
+                f.properties.sum_vehicle_count for f in result.features
+            )
+            if result.total_points > 0:
+                result.avg_speed = round(
+                    sum(
+                        f.properties.avg_speed_kmh * f.properties.point_count
+                        for f in result.features
+                    ) / result.total_points,
+                    1,
+                )
+            else:
+                result.avg_speed = None
+            result.high_count = sum(
+                1 for f in result.features if f.properties.severity == "HIGH"
+            )
+            result.medium_count = sum(
+                1 for f in result.features if f.properties.severity == "MEDIUM"
+            )
+            result.low_count = sum(
+                1 for f in result.features if f.properties.severity == "LOW"
+            )
+
+        return result
+
+    # ── Validate: both or neither ─────────────────────────────────────
+    if (date is None) != (hour is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Both 'date' and 'hour' must be provided for temporal mode.",
+        )
+
+    # ── Legacy mode (backward compatible) ─────────────────────────────
     clusters = await get_cached_cluster_summaries()
     if not clusters:
         return GeoJSONFeatureCollection(features=[])

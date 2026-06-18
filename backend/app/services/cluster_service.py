@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta
 
 from backend.app.config import get_settings
 from backend.app.database import get_pool
@@ -22,6 +23,9 @@ from backend.app.models.cluster import (
     HeatmapPoint,
     HeatmapResponse,
     StatsResponse,
+    TemporalClusterProperties,
+    TemporalClusterResponse,
+    TemporalGeoJSONFeature,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,4 +274,166 @@ async def get_global_stats() -> StatsResponse:
         low_severity_count=0,
         date_range_start=row["date_range_start"],
         date_range_end=row["date_range_end"],
+    )
+
+
+# ── Temporal (Hourly) Clustering ──────────────────────────────────────────
+# These parameters are tuned for single-hour time slices (~2,400 rows per hour)
+# rather than the full dataset (99.6M rows). The existing pipeline defaults
+# (eps=500, minpoints=3, avg_speed<20, vehicle_count>500) are too strict
+# for hourly snapshots and yield zero clusters.
+_TEMPORAL_EPS_METERS = 1000
+_TEMPORAL_MINPOINTS = 2
+_TEMPORAL_MAX_AVG_SPEED = 25  # km/h
+
+_TEMPORAL_CLUSTER_SQL = """
+SELECT
+    cluster_id,
+    COUNT(*)::int                                                   AS point_count,
+    SUM(vehicle_count)::int                                         AS sum_vehicle_count,
+    AVG(vehicle_count)::float                                       AS avg_vehicle_count,
+    AVG(avg_speed)::float                                           AS avg_speed_kmh,
+    ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lat,
+    ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lon
+FROM (
+    SELECT
+        vehicle_count,
+        avg_speed,
+        geom,
+        COALESCE(
+            ST_ClusterDBSCAN(geom, eps := {eps}, minpoints := {minpts}) OVER (),
+            -1
+        ) AS cluster_id
+    FROM ibb_traffic_density
+    WHERE record_time >= $1::timestamp
+      AND record_time <  $2::timestamp
+      AND avg_speed < {max_speed}
+) sub
+WHERE cluster_id >= 0
+GROUP BY cluster_id
+ORDER BY sum_vehicle_count DESC;
+""".format(
+    eps=_TEMPORAL_EPS_METERS,
+    minpts=_TEMPORAL_MINPOINTS,
+    max_speed=_TEMPORAL_MAX_AVG_SPEED,
+)
+
+
+def assign_hourly_severity(avg_speed_kmh: float) -> str:
+    """Assign severity based on average speed for a single-hour snapshot.
+
+    This is a simple speed-based classification, NOT the historical AIS score.
+    The AIS score depends on duration/recurrence which have no meaning for
+    a single hourly time slice.
+
+    Thresholds:
+        avg_speed < 15 km/h  ->  HIGH   (severe congestion)
+        avg_speed < 20 km/h  ->  MEDIUM (moderate congestion)
+        avg_speed < 25 km/h  ->  LOW    (light congestion)
+    """
+    if avg_speed_kmh < 15:
+        return "HIGH"
+    elif avg_speed_kmh < 20:
+        return "MEDIUM"
+    else:
+        return "LOW"
+
+
+async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResponse:
+    """Run spatial DBSCAN on a single-hour slice and return clustered GeoJSON.
+
+    Parameters
+    ----------
+    date_str : str
+        Date in YYYY-MM-DD format.
+    hour : int
+        Hour of day (0-23).
+
+    Returns
+    -------
+    TemporalClusterResponse
+        GeoJSON FeatureCollection with per-cluster centroids, severity,
+        vehicle counts, and response metadata.
+    """
+    if hour < 0 or hour > 23:
+        raise ValueError("Invalid hour. Expected an integer between 0 and 23.")
+
+    try:
+        selected_date = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(
+            "Invalid date. Expected a real calendar date in YYYY-MM-DD format."
+        ) from exc
+
+    start_ts = selected_date.replace(hour=hour, minute=0, second=0, microsecond=0)
+    end_ts = start_ts + timedelta(hours=1)
+
+    pool = await get_pool()
+    t0 = time.monotonic()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(_TEMPORAL_CLUSTER_SQL, start_ts, end_ts)
+    elapsed_ms = (time.monotonic() - t0) * 1000
+
+    logger.info(
+        "Temporal clustering: date=%s hour=%02d clusters=%d elapsed=%.1fms",
+        date_str, hour, len(rows), elapsed_ms,
+    )
+
+    if not rows:
+        return TemporalClusterResponse(
+            date=date_str,
+            hour=hour,
+            cluster_count=0,
+            features=[],
+        )
+
+    features = []
+    total_points = 0
+    total_vehicles = 0
+    speed_sum = 0.0
+    high_count = 0
+    medium_count = 0
+    low_count = 0
+
+    for r in rows:
+        severity = assign_hourly_severity(r["avg_speed_kmh"])
+        if severity == "HIGH":
+            high_count += 1
+        elif severity == "MEDIUM":
+            medium_count += 1
+        else:
+            low_count += 1
+
+        total_points += r["point_count"]
+        total_vehicles += r["sum_vehicle_count"]
+        speed_sum += r["avg_speed_kmh"] * r["point_count"]
+
+        feature = TemporalGeoJSONFeature(
+            geometry=GeoJSONGeometry(
+                coordinates=[r["centroid_lon"], r["centroid_lat"]]
+            ),
+            properties=TemporalClusterProperties(
+                cluster_id=r["cluster_id"],
+                severity=severity,
+                point_count=r["point_count"],
+                avg_speed_kmh=round(r["avg_speed_kmh"], 1),
+                sum_vehicle_count=r["sum_vehicle_count"],
+                avg_vehicle_count=round(r["avg_vehicle_count"], 1),
+            ),
+        )
+        features.append(feature)
+
+    overall_avg_speed = round(speed_sum / total_points, 1) if total_points > 0 else None
+
+    return TemporalClusterResponse(
+        date=date_str,
+        hour=hour,
+        cluster_count=len(features),
+        total_points=total_points,
+        total_vehicles=total_vehicles,
+        avg_speed=overall_avg_speed,
+        high_count=high_count,
+        medium_count=medium_count,
+        low_count=low_count,
+        features=features,
     )

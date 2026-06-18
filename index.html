@@ -1,77 +1,530 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>İstanbul Trafik Analiz - Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İstanbul Trafik Yoğunluğu Analizi</title>
+    <meta name="description" content="İstanbul trafik yoğunluğu kümelenmesi - tarih ve saate göre analiz">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        #map {
-            height: 600px;
-            width: 100%;
-            border-radius: 10px;
+        /* ── Reset & Base ───────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f7f7f7;
+            color: #222;
+            font-size: 14px;
+            line-height: 1.5;
         }
 
-        .legend {
-            background: white;
-            padding: 10px;
-            line-height: 1.5;
-            border-radius: 5px;
+        /* ── Header ─────────────────────────────────────────────────── */
+        .header {
+            background: #fff;
+            border-bottom: 1px solid #ddd;
+            padding: 14px 24px;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #111;
+        }
+        .header p {
+            font-size: 13px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        /* ── Controls ───────────────────────────────────────────────── */
+        .controls {
+            background: #fff;
+            border-bottom: 1px solid #ddd;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .control-group label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #444;
+            white-space: nowrap;
+        }
+        .control-group input[type="date"],
+        .control-group select {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px 8px;
+            font-size: 13px;
+            background: #fff;
+            color: #222;
+        }
+        .control-group input[type="range"] {
+            width: 160px;
+            cursor: pointer;
+        }
+        .hour-label {
+            font-size: 13px;
+            font-weight: 500;
+            color: #222;
+            min-width: 90px;
+        }
+        .btn-refresh {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px 14px;
+            font-size: 13px;
+            background: #fff;
+            color: #222;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-refresh:hover {
+            background: #f0f0f0;
+        }
+
+        /* ── Summary Cards ──────────────────────────────────────────── */
+        .summary {
+            padding: 12px 24px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 10px 16px;
+            min-width: 140px;
+            flex: 1;
+        }
+        .card .card-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #888;
+            letter-spacing: 0.5px;
+        }
+        .card .card-value {
+            font-size: 22px;
+            font-weight: 600;
+            color: #222;
+            margin-top: 2px;
+        }
+
+        /* ── Map Container ──────────────────────────────────────────── */
+        .map-container {
+            padding: 0 24px 12px 24px;
+        }
+        #map {
+            height: calc(100vh - 300px);
+            min-height: 400px;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #eee;
+        }
+
+        /* ── Legend ──────────────────────────────────────────────────── */
+        .legend-box {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px 12px;
+            line-height: 1.8;
+            font-size: 12px;
+        }
+        .legend-box strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1px solid #999;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        /* ── Status Messages ────────────────────────────────────────── */
+        .status-message {
+            text-align: center;
+            padding: 40px 24px;
+            color: #888;
+            font-size: 14px;
+        }
+        .status-message.error {
+            color: #c00;
+        }
+
+        /* ── Footer ─────────────────────────────────────────────────── */
+        .footer {
+            text-align: center;
+            padding: 8px 24px;
+            font-size: 11px;
+            color: #999;
+        }
+
+        /* ── Popup Overrides ────────────────────────────────────────── */
+        .leaflet-popup-content {
+            font-size: 13px;
+            line-height: 1.6;
+            margin: 10px 14px;
+        }
+        .popup-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .popup-row .popup-label {
+            font-weight: 600;
+            color: #444;
+            white-space: nowrap;
+        }
+        .popup-row .popup-value {
+            color: #222;
+            text-align: right;
         }
     </style>
 </head>
-
 <body>
-    <h2>🚀 İstanbul Trafik Anomali Analizi</h2>
-    <div id="map"></div>
+
+    <!-- Header -->
+    <div class="header">
+        <h1 id="page-title">İstanbul Trafik Yoğunluğu Analizi</h1>
+        <p>Tarih ve saate göre trafik kümelenmesi</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <div class="control-group">
+            <label for="datePicker">Tarih:</label>
+            <input type="date" id="datePicker" min="2020-01-01" max="2025-01-31" value="2025-01-17">
+        </div>
+        <div class="control-group">
+            <label for="hourSlider">Saat:</label>
+            <input type="range" id="hourSlider" min="0" max="23" step="1" value="18">
+            <span class="hour-label" id="hourLabel">18:00 - 18:59</span>
+        </div>
+        <div class="control-group">
+            <label for="severityFilter">Yoğunluk Düzeyi:</label>
+            <select id="severityFilter">
+                <option value="">Tüm Seviyeler</option>
+                <option value="HIGH">Yüksek</option>
+                <option value="MEDIUM">Orta</option>
+                <option value="LOW">Düşük</option>
+            </select>
+        </div>
+        <button class="btn-refresh" id="btnRefresh">Yenile</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="summary">
+        <div class="card">
+            <div class="card-label">Küme Sayısı</div>
+            <div class="card-value" id="cardClusterCount">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Ortalama Hız</div>
+            <div class="card-value" id="cardAvgSpeed">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Saatlik Araç Hacmi</div>
+            <div class="card-value" id="cardTotalVehicles">-</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Yüksek Seviye</div>
+            <div class="card-value" id="cardHighCount">-</div>
+        </div>
+    </div>
+
+    <!-- Map -->
+    <div class="map-container">
+        <div id="map"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        Veri aralığı: 2020-01-01 / 2025-01-31<br><span style="opacity: 0.8; font-size: 11px; margin-top: 5px; display: inline-block;">Yoğunluk düzeyi ortalama hıza göre hesaplanır. Saatlik araç hacmi, seçilen saat aralığında ölçüm hücrelerinden geçen toplam araç akışını ifade eder.</span>
+    </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // 1. Haritayı İstanbul'a Odakla
-        const map = L.map('map').setView([41.0082, 28.9784], 11);
+    (function () {
+        'use strict';
 
-        // 2. Alt Harita (Base Layer) Ekle
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        // ── Constants ────────────────────────────────────────────────
+        var API_BASE = window.location.origin;
+        var ISTANBUL_CENTER = [41.0082, 28.9784];
+        var DEFAULT_ZOOM = 11;
 
-        // 3. Fikrat'ın Backend'inden Verileri Çek
-        fetch('http://localhost:8000/api/clusters')
-            .then(response => response.json())
-            .then(data => {
-                L.geoJSON(data, {
-                    pointToLayer: (feature, latlng) => {
-                        // Şiddete göre renk belirle (HIGH=Kırmızı, MEDIUM=Turuncu, LOW=Mavi)
-                        let color = feature.properties.severity === 'HIGH' ? '#ff4d4d' :
-                            feature.properties.severity === 'MEDIUM' ? '#ffa500' : '#4d94ff';
+        var SEVERITY_COLORS = {
+            HIGH:   '#d32f2f',
+            MEDIUM: '#f57c00',
+            LOW:    '#fbc02d'
+        };
+        var SEVERITY_LABELS = {
+            HIGH:   'Y\u00fcksek',
+            MEDIUM: 'Orta',
+            LOW:    'D\u00fc\u015f\u00fck'
+        };
 
-                        return L.circleMarker(latlng, {
-                            radius: 10,
-                            fillColor: color,
-                            color: "#000",
-                            weight: 1,
-                            opacity: 1,
-                            fillOpacity: 0.8
-                        });
-                    },
-                    onEachFeature: (feature, layer) => {
-                        function esc(str) {
-                            if (str == null) return '';
-                            return String(str)
-                                .replace(/&/g, '&amp;')
-                                .replace(/</g, '&lt;')
-                                .replace(/>/g, '&gt;')
-                                .replace(/"/g, '&quot;');
-                        }
-                        // Tıklayınca bilgi kutucuğu (Popup)
-                        layer.bindPopup(`
-                            <strong>⚠️ Şiddet:</strong> ${esc(feature.properties.severity)}<br>
-                            <strong>⏰ Zirve Saat:</strong> ${esc(feature.properties.peak_time)}<br>
-                            <strong>📊 Araç Sayısı:</strong> ${esc(feature.properties.avg_vehicle_count)}
-                        `);
+        // ── DOM Elements ─────────────────────────────────────────────
+        var datePicker     = document.getElementById('datePicker');
+        var hourSlider     = document.getElementById('hourSlider');
+        var hourLabel      = document.getElementById('hourLabel');
+        var severityFilter = document.getElementById('severityFilter');
+        var btnRefresh     = document.getElementById('btnRefresh');
+        var cardClusterCount  = document.getElementById('cardClusterCount');
+        var cardAvgSpeed      = document.getElementById('cardAvgSpeed');
+        var cardTotalVehicles = document.getElementById('cardTotalVehicles');
+        var cardHighCount     = document.getElementById('cardHighCount');
+
+        // ── Map Setup ────────────────────────────────────────────────
+        var map = L.map('map').setView(ISTANBUL_CENTER, DEFAULT_ZOOM);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap',
+            maxZoom: 18
+        }).addTo(map);
+
+        var clusterLayer = null;
+
+        // ── Legend Control ────────────────────────────────────────────
+        var legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function () {
+            var div = L.DomUtil.create('div', 'legend-box');
+            div.innerHTML =
+                '<strong>Lejant</strong>' +
+                '<div class="legend-item"><span class="legend-color" style="background:#d32f2f"></span> Y\u00fcksek</div>' +
+                '<div class="legend-item"><span class="legend-color" style="background:#f57c00"></span> Orta</div>' +
+                '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> D\u00fc\u015f\u00fck</div>';
+            return div;
+        };
+        legend.addTo(map);
+
+        // ── Utility Functions ────────────────────────────────────────
+
+        function getSelectedDate() {
+            return datePicker.value;
+        }
+
+        function getSelectedHour() {
+            return parseInt(hourSlider.value, 10);
+        }
+
+        function getSelectedSeverity() {
+            return severityFilter.value;
+        }
+
+        function formatHourLabel(h) {
+            var hh = h.toString().padStart(2, '0');
+            return hh + ':00 - ' + hh + ':59';
+        }
+
+        function updateHourLabel() {
+            hourLabel.textContent = formatHourLabel(getSelectedHour());
+        }
+
+        function escapeHtml(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function clearMapLayer() {
+            if (clusterLayer) {
+                map.removeLayer(clusterLayer);
+                clusterLayer = null;
+            }
+        }
+
+        function updateSummaryCards(data) {
+            if (!data || data.cluster_count === 0) {
+                cardClusterCount.textContent = '0';
+                cardAvgSpeed.textContent = '-';
+                cardTotalVehicles.textContent = '0';
+                cardHighCount.textContent = '0';
+                return;
+            }
+            cardClusterCount.textContent = data.cluster_count;
+            cardAvgSpeed.textContent = data.avg_speed != null
+                ? data.avg_speed.toFixed(1) + ' km/h'
+                : '-';
+            cardTotalVehicles.textContent = data.total_vehicles.toLocaleString('tr-TR');
+            cardHighCount.textContent = data.high_count;
+        }
+
+        function showStatusMessage(text, isError) {
+            clearMapLayer();
+            var container = document.getElementById('map');
+            // Remove previous overlay if any
+            var prev = container.querySelector('.status-overlay');
+            if (prev) prev.remove();
+
+            var overlay = document.createElement('div');
+            overlay.className = 'status-overlay';
+            overlay.style.cssText =
+                'position:absolute;top:0;left:0;right:0;bottom:0;' +
+                'display:flex;align-items:center;justify-content:center;' +
+                'background:rgba(255,255,255,0.85);z-index:1000;' +
+                'font-size:14px;color:' + (isError ? '#c00' : '#888') + ';' +
+                'pointer-events:none;';
+            overlay.textContent = text;
+            container.style.position = 'relative';
+            container.appendChild(overlay);
+        }
+
+        function clearStatusMessage() {
+            var container = document.getElementById('map');
+            var prev = container.querySelector('.status-overlay');
+            if (prev) prev.remove();
+        }
+
+        // ── Build popup content ──────────────────────────────────────
+
+        function buildPopupContent(props, selectedDate, selectedHour) {
+            var hourStr = selectedHour.toString().padStart(2, '0');
+            var severity = SEVERITY_LABELS[props.severity] || props.severity;
+
+            return '<div>' +
+                '<div class="popup-row"><span class="popup-label">Tarih:</span><span class="popup-value">' + escapeHtml(selectedDate) + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Saat:</span><span class="popup-value">' + hourStr + ':00 - ' + hourStr + ':59</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Yoğunluk Düzeyi:</span><span class="popup-value">' + escapeHtml(severity) + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Ortalama H\u0131z:</span><span class="popup-value">' + props.avg_speed_kmh.toFixed(1) + ' km/h</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Saatlik Araç Hacmi:</span><span class="popup-value">' + props.sum_vehicle_count.toLocaleString('tr-TR') + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Ölçüm Hücresi:</span><span class="popup-value">' + props.point_count + '</span></div>' +
+                '</div>';
+        }
+
+        // ── Render clusters on map ───────────────────────────────────
+
+        function renderClusters(data) {
+            clearMapLayer();
+            clearStatusMessage();
+
+            if (!data || !data.features || data.features.length === 0) {
+                showStatusMessage('Se\u00e7ilen tarih ve saat i\u00e7in trafik k\u00fcmesi bulunamad\u0131.', false);
+                updateSummaryCards(data);
+                return;
+            }
+
+            updateSummaryCards(data);
+
+            var selectedDate = data.date;
+            var selectedHour = data.hour;
+
+            clusterLayer = L.geoJSON(data, {
+                pointToLayer: function (feature, latlng) {
+                    var color = SEVERITY_COLORS[feature.properties.severity] || '#999';
+                    return L.circleMarker(latlng, {
+                        radius: 8,
+                        fillColor: color,
+                        color: '#555',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.85
+                    });
+                },
+                onEachFeature: function (feature, layer) {
+                    var html = buildPopupContent(feature.properties, selectedDate, selectedHour);
+                    layer.bindPopup(html);
+                }
+            }).addTo(map);
+
+            // Fit bounds if clusters exist, keep a reasonable zoom
+            var bounds = clusterLayer.getBounds();
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+            }
+        }
+
+        // ── Fetch temporal clusters from API ─────────────────────────
+
+        var fetchAbortController = null;
+
+        function fetchTemporalClusters() {
+            var selectedDate = getSelectedDate();
+            var selectedHour = getSelectedHour();
+            var severity = getSelectedSeverity();
+
+            if (!selectedDate) return;
+
+            // Abort any in-flight request
+            if (fetchAbortController) {
+                fetchAbortController.abort();
+            }
+            fetchAbortController = new AbortController();
+
+            var url = API_BASE + '/api/clusters?date=' + selectedDate + '&hour=' + selectedHour;
+            if (severity) {
+                url += '&severity=' + severity;
+            }
+
+            showStatusMessage('Y\u00fckleniyor...', false);
+
+            fetch(url, { signal: fetchAbortController.signal })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
                     }
-                }).addTo(map);
-            })
-            .catch(err => console.error("Backend'e bağlanılamadı!", err));
+                    return response.json();
+                })
+                .then(function (data) {
+                    renderClusters(data);
+                })
+                .catch(function (err) {
+                    if (err.name === 'AbortError') return;
+                    console.error('API error:', err);
+                    showStatusMessage(
+                        'Sunucu hatas\u0131. L\u00fctfen backend servisinin \u00e7al\u0131\u015ft\u0131\u011f\u0131n\u0131 kontrol edin.',
+                        true
+                    );
+                    updateSummaryCards(null);
+                });
+        }
+
+        // ── Event Listeners ──────────────────────────────────────────
+
+        var sliderDebounceTimer = null;
+
+        hourSlider.addEventListener('input', function () {
+            updateHourLabel();
+            clearTimeout(sliderDebounceTimer);
+            sliderDebounceTimer = setTimeout(fetchTemporalClusters, 300);
+        });
+
+        datePicker.addEventListener('change', function () {
+            fetchTemporalClusters();
+        });
+
+        severityFilter.addEventListener('change', function () {
+            fetchTemporalClusters();
+        });
+
+        btnRefresh.addEventListener('click', function () {
+            fetchTemporalClusters();
+        });
+
+        // ── Initial Load ─────────────────────────────────────────────
+        updateHourLabel();
+        fetchTemporalClusters();
+
+    })();
     </script>
 </body>
-
 </html>

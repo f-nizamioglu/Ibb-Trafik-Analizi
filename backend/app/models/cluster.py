@@ -62,6 +62,49 @@ class GeoJSONFeatureCollection(BaseModel):
     features: list[GeoJSONFeature]
 
 
+# ─── Temporal (Hourly) Cluster Models ─────────────────────────────────────
+
+class TemporalClusterProperties(BaseModel):
+    """Properties for a single-hour cluster snapshot.
+
+    Unlike ClusterProperties, this does NOT include duration_hours,
+    recurrence_days, or ais_score — those are historical aggregate
+    metrics that have no meaning for a single-hour time slice.
+    """
+    cluster_id: int
+    severity: str = Field(..., description="LOW | MEDIUM | HIGH")
+    point_count: int = Field(..., description="Number of measurement points in the cluster")
+    avg_speed_kmh: float = Field(..., description="Mean speed across cluster points (km/h)")
+    sum_vehicle_count: int = Field(..., description="Total vehicles across cluster points")
+    avg_vehicle_count: float = Field(..., description="Mean vehicles per point (internal)")
+
+
+class TemporalGeoJSONFeature(BaseModel):
+    """A single GeoJSON Feature for temporal cluster data."""
+    type: str = "Feature"
+    geometry: GeoJSONGeometry
+    properties: TemporalClusterProperties
+
+
+class TemporalClusterResponse(BaseModel):
+    """Response wrapper for temporal cluster queries.
+
+    Contains the GeoJSON FeatureCollection plus metadata about
+    the requested date, hour, and summary statistics.
+    """
+    type: str = "FeatureCollection"
+    date: str = Field(..., description="Requested date (YYYY-MM-DD)")
+    hour: int = Field(..., description="Requested hour (0-23)")
+    cluster_count: int
+    total_points: int = Field(0, description="Total measurement points across all clusters")
+    total_vehicles: int = Field(0, description="Sum of vehicle counts across all clusters")
+    avg_speed: Optional[float] = Field(None, description="Overall avg speed across clusters (km/h)")
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    features: list[TemporalGeoJSONFeature]
+
+
 # ─── Heatmap Point ────────────────────────────────────────────────────────
 
 class HeatmapPoint(BaseModel):
