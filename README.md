@@ -139,7 +139,7 @@ uvicorn backend.app.main:app --reload --port 8000
 |----------|----------|
 | `GET /api/clusters` | Eski toplulaştırılmış AIS tabanlı kümeleri GeoJSON olarak döner |
 | `GET /api/clusters?severity=HIGH` | Eski toplulaştırılmış kümeleri seviyeye göre filtreler |
-| `GET /api/clusters?date=YYYY-MM-DD&hour=HH` | Seçilen tarih ve saat için saatlik hız tabanlı trafik yoğunluğu kümelerini döner |
+| `GET /api/clusters?date=YYYY-MM-DD&hour=HH` | Seçilen tarih ve saat için saatlik trafik yoğunluk kümelerini döner (`congestion_score` tabanlı) |
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Saatlik kümeleri `HIGH`, `MEDIUM` veya `LOW` seviyesine göre filtreler |
 | `GET /api/clusters/{id}` | Tek küme detayı |
 | `GET /api/stats` | Genel istatistikler |
@@ -158,7 +158,9 @@ Arayüzün kullandığı ana sorgu biçimi:
 - `hour` değeri 0-23 arasında bir tam sayı olmalıdır.
 - `severity` isteğe bağlıdır ve `HIGH`, `MEDIUM` veya `LOW` olabilir.
 - Temporal mod tek bir saatlik kesit üzerinde PostGIS mekansal DBSCAN çalıştırır.
-- Temporal moddaki yoğunluk düzeyi AIS skoruna değil, seçilen saat içindeki ortalama hıza dayalıdır.
+- Temporal moddaki yoğunluk düzeyi, hız düşüşü + saatlik araç hacmi + küme kapsamından türetilen `congestion_score` (0-100) ile belirlenir; yalnızca ortalama hıza dayalı değildir.
+- Harita işaretçileri DBSCAN küme merkezleridir; birebir sensör veya araç konumu değildir.
+- Yol uzunluğu tabanlı yoğunluk normalizasyonu deneysel katmandadır ve canlı endpoint'te kullanılmaz.
 
 ---
 

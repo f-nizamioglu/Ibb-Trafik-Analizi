@@ -4,19 +4,24 @@
 
 Bu belge, İstanbul trafik yoğunluğu analiz arayüzünün son kullanıcıya dönük
 çalışma biçimini açıklar. Arayüz, İBB saatlik trafik yoğunluğu verisi üzerinde
-seçilen tarih ve saat için trafik yoğunluğu kümelerini harita üzerinde gösterir.
+seçilen tarih ve saat için trafik yoğunluk kümelerini harita üzerinde gösterir.
 
 Uygulama bir tahmin sistemi değildir. Canlı arayüz, seçilen tarih-saat kesitinde
 veritabanındaki gözlenmiş trafik kayıtlarını kullanır.
+
+Bu harita ham SQL/DBSCAN nokta saçılımı değildir. Kullanıcıya yönelik bir trafik
+yoğunluğu / tıkanıklık riski görselleştirmesidir. Renk ve boyut; hız düşüşü,
+saatlik araç hacmi ve küme kapsamından türetilen `congestion_score` ile
+ilişkilidir. İşaretçiler küme merkezlerini gösterir.
 
 ## Arayüz ve Kod Dili
 
 - Kullanıcı arayüzü Türkçedir.
 - Kod, API parametreleri, dosya adları ve veritabanı alanları İngilizce kalır.
 - Örnek kullanıcı etiketleri: `Tarih`, `Saat`, `Yoğunluk Düzeyi`,
-  `Saatlik Araç Hacmi`, `Ölçüm Hücresi`.
-- Örnek kod/API adları: `date`, `hour`, `severity`, `cluster_id`,
-  `fetchTemporalClusters`.
+  `Küme Ortalama Hızı`, `Saatlik Araç Hacmi`, `Yüksek Yoğunluk`, `Hücre Sayısı`.
+- Örnek kod/API adları: `date`, `hour`, `severity`, `congestion_score`,
+  `cluster_id`, `fetchTemporalClusters`.
 
 ## Temporal Endpoint
 
@@ -50,72 +55,89 @@ zaman aralığını temsil eder:
 23 -> 23:00:00 <= record_time < ertesi gün 00:00:00
 ```
 
-Bu yaklaşım, günün son saatinde de aynı mantığın kullanılmasını sağlar.
+## Yoğunluk Skoru ve Seviyeler
 
-## Yoğunluk Seviyeleri
+Önceki sürümde yoğunluk düzeyi yalnızca küme ortalama hızına göre atanıyordu.
+Bu yaklaşım yanıltıcıydı çünkü:
 
-Saatlik modda yoğunluk düzeyi AIS skoruna göre değil, seçilen saat içindeki
-ortalama hıza göre sınıflandırılır:
+- `Düşük` etiketi düşük trafik gibi okunabiliyordu; oysa aday kümeler zaten
+  yavaş hız filtresinden geçmiştir.
+- Yoğun akşam saatlerinde (ör. 18:00) yüksek araç hacmi görsel olarak yeterince
+  vurgulanmıyordu.
+- Gece saatlerinde (ör. 23:00) düşük hacimli küçük kümeler aynı görsel ağırlıkta
+  kalabiliyordu.
 
-| API Değeri | Arayüz Etiketi | Açıklama |
-|------------|----------------|----------|
-| `HIGH` | Yüksek | Ortalama hız 15 km/h altında |
-| `MEDIUM` | Orta | Ortalama hız 15-20 km/h aralığında |
-| `LOW` | Düşük | Ortalama hız 20-25 km/h aralığında |
+Güncel saatlik modda her küme için `congestion_score` (0-100) hesaplanır:
 
-Bu sınıflandırma, tek saatlik kesitte süre ve tekrarlılık bilgisi olmadığı için
-AIS yerine hız düşüşünü kullanır.
+```text
+congestion_score = 100 * (
+    0.45 * speed_component
+  + 0.35 * volume_component
+  + 0.15 * coverage_component
+  + 0.05 * min_speed_component
+)
+```
+
+Bileşenler:
+
+| Bileşen | Kaynak | Açıklama |
+|---------|--------|----------|
+| `speed_component` | `avg_speed_kmh` | 10 km/h → 1.0, 30 km/h → 0.0 (doğrusal) |
+| `volume_component` | `sum_vehicle_count` | Saat içi göreli log ölçek; mutlak düşük hacim cezası |
+| `coverage_component` | `point_count` | Küçük (2 hücreli) kümeler daha düşük güven |
+| `min_speed_component` | `min_speed_kmh` | Küme içi en yavaş hücreyi yakalar |
+
+Seviye eşikleri (audit verisine göre ayarlanmış mutlak hacim korumaları ile):
+
+| API | Arayüz | Koşul özeti |
+|-----|--------|-------------|
+| `HIGH` | Yüksek Yoğunluk | `congestion_score >= 75` ve `avg_speed < 22` ve hacim ≥ 500 ve hücre ≥ 2; veya `avg_speed <= 14.5` ve hacim ≥ 180; veya `min_speed <= 11` ve hacim ≥ 300 |
+| `MEDIUM` | Orta Yoğunluk | `congestion_score >= 48` ve `avg_speed < 27` ve hacim ≥ 120 |
+| `LOW` | Düşük Yoğunluk | Diğer aday kümeler |
 
 ## Arayüz Metrikleri
 
-**Yoğunluk Düzeyi** seçilen saatlik kümenin hız tabanlı yoğunluk sınıfıdır.
-Tek başına araç sayısı bu etiketi belirlemez.
+**Küme Ortalama Hızı** seçilen saatteki tüm kümelerin hücre ağırlıklı ortalama
+hızıdır; İstanbul geneli ortalama hızı değildir.
 
 **Saatlik Araç Hacmi** seçilen saat aralığında kümeye giren ölçüm hücrelerindeki
-araç akışlarının toplamıdır. Bu değer, işaretçi noktasında aynı anda fiziksel
-olarak bulunan araç sayısı değildir.
+araç akışlarının toplamıdır.
 
-**Ölçüm Hücresi** kümenin kaç trafik ölçüm noktasından/geohash hücresinden
-oluştuğunu gösterir.
+**Yüksek Yoğunluk** seçilen saatte `HIGH` sınıfındaki küme sayısıdır.
 
-Haritadaki işaretçi, kümenin geometrik merkezidir. Tüm araçların fiziksel
-konumunu temsil etmez.
+**Hücre Sayısı** kümenin kaç trafik ölçüm hücresinden (geohash tabanlı) oluştuğunu
+gösterir.
+
+Haritadaki işaretçi, DBSCAN kümesinin geometrik merkezidir. Gerçek araç, sensör
+veya yol noktası değildir. Popup bu sınırlılığı açıkça belirtir.
 
 ## Yol Kapasitesi ve Yol Boyutu
 
-Canlı endpoint, yol kapasitesi için doğrudan yol uzunluğu normalizasyonu
-kullanmaz. Bunun yerine ortalama hız düşüşünü, talebin yerel kapasiteye göre
-zorlanmasına ilişkin ampirik bir gösterge olarak kullanır.
+Canlı endpoint yol uzunluğu normalizasyonu kullanmaz. Yol yoğunluğu deneyleri
+(`geohash_area`, `road_length`) yalnızca deneysel katmandadır.
 
-Ham araç sayısı tek başına tıkanıklığı belirlemek için yeterli değildir. Aynı
-araç hacmi kısa bir bağlantı yolunda ciddi tıkanıklık anlamına gelebilirken,
-daha uzun veya yüksek kapasiteli bir arterde olağan akışa karşılık gelebilir.
+## Doğrulama Örnekleri (2025-01-17)
 
-Projede yol yoğunluğu normalizasyonu deneysel katman olarak incelenmiştir.
-Ancak canlı endpoint'te kullanılmamaktadır. Geohash sınırları ile yol geometrisi
-kesişimleri, çok kısa yol parçaları, eksik OSM kapsamı veya sınıf filtreleri
-nedeniyle uç değerler üretebilir. Bu nedenle son arayüzde daha kararlı olan
-hız tabanlı saatlik sınıflandırma tercih edilmiştir.
+Beklenen davranış:
+
+- 18:00, 23:00'dan görsel olarak daha yoğun okunmalıdır (daha yüksek toplam hacim,
+  daha büyük/koyu işaretçiler, daha fazla orta/yüksek yoğunluk).
+- 23:00'da düşük hacimli kümeler çoğunlukla küçük ve daha şeffaf kalmalıdır.
+- Tüm saatlerde harita kırmızıya dönmemelidir.
 
 ## Yerel Çalıştırma
-
-Veritabanı ve veri hazırlandıktan sonra API sunucusu:
 
 ```bash
 uvicorn backend.app.main:app --reload --port 8000
 ```
 
-Arayüz:
-
-```text
-http://localhost:8000
-```
+Arayüz: `http://localhost:8000`
 
 Örnek API çağrıları:
 
 ```bash
 curl "http://localhost:8000/api/clusters?date=2025-01-17&hour=18"
-curl "http://localhost:8000/api/clusters?date=2025-01-17&hour=18&severity=HIGH"
+curl "http://localhost:8000/api/health"
 ```
 
 Testler:
@@ -126,9 +148,8 @@ pytest tests/ -q
 
 ## Bilinen Sınırlılıklar
 
-- Saatlik mod, tek saatlik gözlem kesitini analiz eder; süre ve tekrarlılık
-  bileşenlerini içermez.
-- Saatlik yoğunluk düzeyi AIS skoru değildir.
+- Saatlik mod tek saatlik gözlem kesitini analiz eder; süre ve tekrarlılık
+  bileşenlerini içermez (bunlar yalnızca legacy AIS modunda vardır).
 - Canlı endpoint tam ε₂ tabanlı ST-DBSCAN uygulaması değildir.
 - Canlı endpoint yol uzunluğu başına araç yoğunluğu kullanmaz.
 - Sonuçlar yerel veritabanındaki veri kapsamına bağlıdır.

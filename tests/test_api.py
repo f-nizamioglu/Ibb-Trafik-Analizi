@@ -113,6 +113,72 @@ def test_settings_dbscan_params_positive():
     assert 0 < s.density_percentile_threshold <= 100
 
 
+# ── Temporal congestion scoring ─────────────────────────────────────────────
+
+def test_congestion_score_rush_hour_beats_late_night():
+    from backend.app.services.cluster_service import score_temporal_clusters
+
+    rush = {
+        "cluster_id": 1,
+        "point_count": 6,
+        "sum_vehicle_count": 12000,
+        "avg_vehicle_count": 2000.0,
+        "avg_speed_kmh": 17.5,
+        "min_speed_kmh": 12.0,
+        "max_speed_kmh": 22.0,
+        "centroid_lat": 41.0,
+        "centroid_lon": 29.0,
+    }
+    late = {
+        "cluster_id": 2,
+        "point_count": 2,
+        "sum_vehicle_count": 90,
+        "avg_vehicle_count": 45.0,
+        "avg_speed_kmh": 19.0,
+        "min_speed_kmh": 16.0,
+        "max_speed_kmh": 22.0,
+        "centroid_lat": 41.1,
+        "centroid_lon": 29.1,
+    }
+    scored = score_temporal_clusters([rush, late])
+    rush_row = next(r for r in scored if r["cluster_id"] == 1)
+    late_row = next(r for r in scored if r["cluster_id"] == 2)
+    assert rush_row["congestion_score"] > late_row["congestion_score"]
+    assert rush_row["severity"] in ("HIGH", "MEDIUM")
+    assert late_row["severity"] == "LOW"
+
+
+def test_congestion_severe_slowdown_can_be_high():
+    from backend.app.services.cluster_service import assign_congestion_severity, compute_congestion_score
+
+    score = compute_congestion_score(
+        avg_speed_kmh=14.5,
+        min_speed_kmh=12.0,
+        sum_vehicle_count=191,
+        point_count=2,
+        hour_vol_p75=3000,
+        hour_vol_max=15000,
+    )
+    severity, reason = assign_congestion_severity(
+        congestion_score=score,
+        avg_speed_kmh=14.5,
+        min_speed_kmh=12.0,
+        sum_vehicle_count=191,
+        point_count=2,
+    )
+    assert severity == "HIGH"
+    assert reason in ("severe_slowdown_high_volume", "high_congestion_score", "severe_local_slowdown")
+
+    tiny_severity, _ = assign_congestion_severity(
+        congestion_score=55.0,
+        avg_speed_kmh=19.0,
+        min_speed_kmh=16.0,
+        sum_vehicle_count=90,
+        point_count=2,
+    )
+    assert tiny_severity == "LOW"
+
+
 # ── Live DB endpoint tests (skipped if no DB) ────────────────────────────────
 
 @pytest.mark.db

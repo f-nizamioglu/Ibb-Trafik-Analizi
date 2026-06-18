@@ -22,7 +22,7 @@ async def health_check():
         return {
             "status": "ok",
             "database": "connected",
-            "service": "Istanbul Traffic Anomaly API",
+            "service": "Istanbul Traffic Density API",
         }
     except Exception as e:
         logger.error("Health check failed: %s", e)

@@ -10,8 +10,10 @@ for Leaflet.js consumption via ST_Transform.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import datetime, timedelta
+from statistics import quantiles
 
 from backend.app.config import get_settings
 from backend.app.database import get_pool
@@ -293,6 +295,8 @@ SELECT
     SUM(vehicle_count)::int                                         AS sum_vehicle_count,
     AVG(vehicle_count)::float                                       AS avg_vehicle_count,
     AVG(avg_speed)::float                                           AS avg_speed_kmh,
+    MIN(avg_speed)::float                                           AS min_speed_kmh,
+    MAX(avg_speed)::float                                           AS max_speed_kmh,
     ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lat,
     ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lon
 FROM (
@@ -318,25 +322,178 @@ ORDER BY sum_vehicle_count DESC;
     max_speed=_TEMPORAL_MAX_AVG_SPEED,
 )
 
+# Volume gates derived from 2025-01-17 hourly audit (cluster sum_vehicle_count).
+# Hour 18 peak cluster ~15k vehicles; hour 23 peak ~1.9k; smallest meaningful
+# HIGH candidate had 191 vehicles at 14.5 km/h.
+_HIGH_ABS_MIN_VOLUME = 500
+_MEDIUM_ABS_MIN_VOLUME = 120
+_VOLUME_ABS_FLOOR = 80
+_SEVERE_SLOWDOWN_MAX_SPEED = 14.5
+_SEVERE_SLOWDOWN_MIN_VOLUME = 180
+
+
+def _linear_inverse(value: float, low: float, high: float) -> float:
+    """Return 1.0 at *low*, 0.0 at *high*, linear between."""
+    if value <= low:
+        return 1.0
+    if value >= high:
+        return 0.0
+    return (high - value) / (high - low)
+
+
+def speed_component(avg_speed_kmh: float) -> float:
+    """Higher when average cluster speed is low (10 km/h worst, 30 km/h free)."""
+    return _linear_inverse(avg_speed_kmh, 10.0, 30.0)
+
+
+def min_speed_component(min_speed_kmh: float) -> float:
+    """Captures locally severe slowdowns inside a cluster."""
+    return _linear_inverse(min_speed_kmh, 8.0, 25.0)
+
+
+def coverage_component(point_count: int) -> float:
+    """Larger clusters carry more spatial confidence."""
+    if point_count <= 1:
+        return 0.35
+    if point_count == 2:
+        return 0.60
+    if point_count <= 4:
+        return 0.75
+    if point_count <= 8:
+        return 0.90
+    return 1.0
+
+
+def volume_component(
+    sum_vehicle_count: int,
+    hour_vol_p75: float,
+    hour_vol_max: int,
+) -> float:
+    """Log-scaled hourly-relative volume with an absolute low-volume guard."""
+    if sum_vehicle_count < _VOLUME_ABS_FLOOR:
+        return 0.08 + 0.22 * (sum_vehicle_count / _VOLUME_ABS_FLOOR)
+
+    log_v = math.log1p(sum_vehicle_count)
+    ref = max(math.log1p(hour_vol_p75), math.log1p(500))
+    rel = min(1.0, log_v / ref) if ref > 0 else 0.0
+
+    if hour_vol_max > 0 and sum_vehicle_count >= hour_vol_max * 0.5:
+        rel = min(1.0, rel * 1.05)
+    return rel
+
+
+def compute_congestion_score(
+    avg_speed_kmh: float,
+    min_speed_kmh: float | None,
+    sum_vehicle_count: int,
+    point_count: int,
+    hour_vol_p75: float,
+    hour_vol_max: int,
+) -> float:
+    """Explainable 0-100 traffic intensity score for a single-hour cluster."""
+    if min_speed_kmh is not None:
+        w_speed, w_vol, w_cov, w_min = 0.45, 0.35, 0.15, 0.05
+        min_c = min_speed_component(min_speed_kmh)
+    else:
+        w_speed, w_vol, w_cov, w_min = 0.50, 0.35, 0.15, 0.0
+        min_c = 0.0
+
+    raw = (
+        w_speed * speed_component(avg_speed_kmh)
+        + w_vol * volume_component(sum_vehicle_count, hour_vol_p75, hour_vol_max)
+        + w_cov * coverage_component(point_count)
+        + w_min * min_c
+    )
+    return round(100 * raw, 1)
+
+
+def assign_congestion_severity(
+    congestion_score: float,
+    avg_speed_kmh: float,
+    min_speed_kmh: float | None,
+    sum_vehicle_count: int,
+    point_count: int,
+) -> tuple[str, str]:
+    """Map congestion_score and guards to LOW | MEDIUM | HIGH."""
+    effective_min = min_speed_kmh if min_speed_kmh is not None else avg_speed_kmh
+
+    if (
+        avg_speed_kmh <= _SEVERE_SLOWDOWN_MAX_SPEED
+        and sum_vehicle_count >= _SEVERE_SLOWDOWN_MIN_VOLUME
+        and point_count >= 2
+    ):
+        return "HIGH", "severe_slowdown_high_volume"
+
+    if (
+        congestion_score >= 75
+        and avg_speed_kmh < 22
+        and sum_vehicle_count >= _HIGH_ABS_MIN_VOLUME
+        and point_count >= 2
+    ):
+        return "HIGH", "high_congestion_score"
+
+    if effective_min <= 11 and sum_vehicle_count >= 300 and point_count >= 2:
+        return "HIGH", "severe_local_slowdown"
+
+    if (
+        congestion_score >= 48
+        and avg_speed_kmh < 27
+        and sum_vehicle_count >= _MEDIUM_ABS_MIN_VOLUME
+    ):
+        return "MEDIUM", "moderate_congestion_score"
+
+    return "LOW", "light_congestion_cluster"
+
+
+def score_temporal_clusters(rows: list[dict]) -> list[dict]:
+    """Attach congestion_score, severity, and severity_reason to cluster rows."""
+    if not rows:
+        return []
+
+    volumes = [int(r["sum_vehicle_count"]) for r in rows]
+    hour_vol_max = max(volumes)
+    if len(volumes) >= 4:
+        hour_vol_p75 = quantiles(volumes, n=4)[2]
+    elif len(volumes) == 1:
+        hour_vol_p75 = float(volumes[0])
+    else:
+        hour_vol_p75 = sorted(volumes)[len(volumes) // 2]
+
+    scored = []
+    for r in rows:
+        congestion_score = compute_congestion_score(
+            avg_speed_kmh=float(r["avg_speed_kmh"]),
+            min_speed_kmh=float(r["min_speed_kmh"]) if r.get("min_speed_kmh") is not None else None,
+            sum_vehicle_count=int(r["sum_vehicle_count"]),
+            point_count=int(r["point_count"]),
+            hour_vol_p75=hour_vol_p75,
+            hour_vol_max=hour_vol_max,
+        )
+        severity, severity_reason = assign_congestion_severity(
+            congestion_score=congestion_score,
+            avg_speed_kmh=float(r["avg_speed_kmh"]),
+            min_speed_kmh=float(r["min_speed_kmh"]) if r.get("min_speed_kmh") is not None else None,
+            sum_vehicle_count=int(r["sum_vehicle_count"]),
+            point_count=int(r["point_count"]),
+        )
+        scored.append(
+            {
+                **r,
+                "congestion_score": congestion_score,
+                "severity": severity,
+                "severity_reason": severity_reason,
+            }
+        )
+    return scored
+
 
 def assign_hourly_severity(avg_speed_kmh: float) -> str:
-    """Assign severity based on average speed for a single-hour snapshot.
-
-    This is a simple speed-based classification, NOT the historical AIS score.
-    The AIS score depends on duration/recurrence which have no meaning for
-    a single hourly time slice.
-
-    Thresholds:
-        avg_speed < 15 km/h  ->  HIGH   (severe congestion)
-        avg_speed < 20 km/h  ->  MEDIUM (moderate congestion)
-        avg_speed < 25 km/h  ->  LOW    (light congestion)
-    """
+    """Deprecated speed-only helper kept for backward-compatible imports/tests."""
     if avg_speed_kmh < 15:
         return "HIGH"
-    elif avg_speed_kmh < 20:
+    if avg_speed_kmh < 20:
         return "MEDIUM"
-    else:
-        return "LOW"
+    return "LOW"
 
 
 async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResponse:
@@ -387,6 +544,8 @@ async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResp
             features=[],
         )
 
+    scored_rows = score_temporal_clusters([dict(r) for r in rows])
+
     features = []
     total_points = 0
     total_vehicles = 0
@@ -395,8 +554,8 @@ async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResp
     medium_count = 0
     low_count = 0
 
-    for r in rows:
-        severity = assign_hourly_severity(r["avg_speed_kmh"])
+    for r in scored_rows:
+        severity = r["severity"]
         if severity == "HIGH":
             high_count += 1
         elif severity == "MEDIUM":
@@ -415,10 +574,18 @@ async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResp
             properties=TemporalClusterProperties(
                 cluster_id=r["cluster_id"],
                 severity=severity,
+                congestion_score=r["congestion_score"],
                 point_count=r["point_count"],
                 avg_speed_kmh=round(r["avg_speed_kmh"], 1),
+                min_speed_kmh=round(r["min_speed_kmh"], 1)
+                if r.get("min_speed_kmh") is not None
+                else None,
+                max_speed_kmh=round(r["max_speed_kmh"], 1)
+                if r.get("max_speed_kmh") is not None
+                else None,
                 sum_vehicle_count=r["sum_vehicle_count"],
                 avg_vehicle_count=round(r["avg_vehicle_count"], 1),
+                severity_reason=r["severity_reason"],
             ),
         )
         features.append(feature)

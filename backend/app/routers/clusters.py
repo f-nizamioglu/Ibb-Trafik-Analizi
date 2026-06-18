@@ -62,7 +62,8 @@ async def list_clusters(
     **Temporal mode** (date + hour provided):
     Runs live PostGIS ST_ClusterDBSCAN on the selected hour slice from
     ibb_traffic_density. Uses hourly-tuned parameters (eps=1000m,
-    minpoints=2, avg_speed<25). Severity is speed-based, not AIS-based.
+    minpoints=2, avg_speed<25). Severity uses congestion_score combining
+    speed drop, hourly vehicle volume, and cluster coverage.
 
     **Legacy mode** (no date/hour):
     Returns cached historical aggregate clusters with AIS scoring.

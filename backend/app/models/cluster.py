@@ -73,10 +73,24 @@ class TemporalClusterProperties(BaseModel):
     """
     cluster_id: int
     severity: str = Field(..., description="LOW | MEDIUM | HIGH")
+    congestion_score: float = Field(
+        ...,
+        description="User-facing traffic intensity score [0, 100]",
+    )
     point_count: int = Field(..., description="Number of measurement points in the cluster")
     avg_speed_kmh: float = Field(..., description="Mean speed across cluster points (km/h)")
+    min_speed_kmh: Optional[float] = Field(
+        None, description="Minimum speed among cluster measurement cells (km/h)"
+    )
+    max_speed_kmh: Optional[float] = Field(
+        None, description="Maximum speed among cluster measurement cells (km/h)"
+    )
     sum_vehicle_count: int = Field(..., description="Total vehicles across cluster points")
     avg_vehicle_count: float = Field(..., description="Mean vehicles per point (internal)")
+    severity_reason: Optional[str] = Field(
+        None,
+        description="Short code explaining the assigned congestion severity",
+    )
 
 
 class TemporalGeoJSONFeature(BaseModel):
