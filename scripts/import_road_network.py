@@ -356,8 +356,7 @@ def main() -> None:
                 "Create schema: python scripts/create_road_schema.py"
             )
 
-    logger.info("\nNext step:")
-    logger.info("  python experiments/road_density.py")
+    logger.info("\nRoad network import complete.")
     conn.close()
 
 

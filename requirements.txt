@@ -16,6 +16,7 @@ pydantic-settings>=2.0
 slowapi>=0.1.9
 
 # ─── Data Download ───
+requests>=2.31
 beautifulsoup4>=4.12
 
 # ─── Road Network Import (OSM) ───

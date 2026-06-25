@@ -1,275 +1,227 @@
-# İstanbul Trafik Anomali Analizi
+# Zaman-Uzamsal Verilerle Trafik Yoğunluğu Analizi ve Görselleştirme Web Portalı
 
-İstanbul Büyükşehir Belediyesi (İBB) Açık Veri Portalı'ndan alınan saatlik trafik yoğunluk verileri üzerinde mekansal anomali tespiti, kümeleme ve görselleştirme sistemi.
+Bu depo, YTÜ Bilgisayar Mühendisliği bitirme projesi için hazırlanmıştır. Proje, İstanbul Büyükşehir Belediyesi saatlik trafik yoğunluğu verisini kullanır. FastAPI, PostgreSQL/PostGIS ve Leaflet.js ile tarih/saat seçimine göre trafik yoğunluğu kümelerini harita üzerinde gösterir. Kullanıcı bir tarih ve saat seçer; sistem ilgili bir saatlik aralıktaki düşük hızlı ölçümleri filtreleyip PostGIS ile mekansal kümeleme yapar. Uygulama geçmiş veriyi görselleştirir; trafik tahmini, rota optimizasyonu veya gerçek zamanlı trafik yönetimi yapmaz.
 
-Bu proje aynı zamanda bir bilgisayar mühendisliği tez çalışmasının parçasıdır.
+## Projenin Yaptıkları ve Yapmadıkları
 
----
+| Yapar | Yapmaz |
+| --- | --- |
+| Tarih/saat bazlı geçmiş trafik yoğunluğu sorgusu yapar. | Tam ST-DBSCAN uygulamaz. |
+| Bir saatlik zaman filtresi uygular. | Aktif sorgu yolunda MobilityDB temporal clustering kullanmaz. |
+| Düşük hızlı ölçümleri ön filtrelemeden geçirir. | Gerçek zamanlı trafik yönetimi yapmaz. |
+| PostGIS `ST_ClusterDBSCAN` ile mekansal kümeleme yapar. | Rota optimizasyonu yapmaz. |
+| Küme merkezlerini Leaflet haritasında gösterir. | Gelecek trafik tahmini üretmez. |
+| Yoğunluk skorunu API yanıtında döndürür. | Ground-truth ile doğrulanmış anomali tespiti iddia etmez. |
 
-## Metodoloji
+## Teknoloji Yığını
 
-**PostGIS Tabanlı Mekansal DBSCAN ve Zamansal Tekrarlılık Analizi**
+- Python 3.10+
+- FastAPI
+- PostgreSQL/PostGIS
+- Docker / Docker Compose
+- Vanilla JavaScript
+- Leaflet.js
+- Pandas / NumPy
+- pytest
 
-Bu sistem, Birant & Kut (2007) ST-DBSCAN algoritmasının tam uygulaması değildir. Temporal epsilon (ε₂) komşuluk mantığı, kümeleme aşamasında uygulanmamaktadır. Bunun yerine:
+## Depo Yapısı
 
-- PostgreSQL/PostGIS içinde `ST_ClusterDBSCAN` pencere fonksiyonu ile mekansal DBSCAN kümeleme (EPSG:32636 metrik geometri üzerinde, eps metre cinsinden)
-- Kümeleme sonrası zamansal tekrarlılık ve süre analizi (AIS bileşenleri üzerinden)
-- Çok kriterli Anomali Yoğunluk Skoru (AIS) hesabı: Hacim %30, Hız Düşüşü %30, Süre %25, Tekrarlılık %15
+```text
+.
+|-- README.md
+|-- .gitignore
+|-- .env.example
+|-- docker-compose.yml
+|-- requirements.txt
+|-- requirements-dev.txt
+|-- index.html
+|-- config.py
+|-- create_views.py
+|-- download_data.py
+|-- ingest_data.py
+|-- run_pipeline.py
+|-- backend/
+|   |-- __init__.py
+|   `-- app/
+|-- data/
+|   |-- raw/ibb_hourly_traffic_density/.gitkeep
+|   `-- road_network/.gitkeep
+|-- scoring/
+|-- scripts/
+|   |-- __init__.py
+|   |-- create_road_schema.py
+|   |-- import_road_network.py
+|   `-- validate_data_coverage.py
+`-- tests/
+```
 
-| Kavram | Açıklama | Bu projede mi? |
-|--------|----------|---------------|
-| DBSCAN | Yoğunluk tabanlı mekansal kümeleme | Kavramsal olarak evet |
-| ST-DBSCAN | Mekansal + zamansal epsilon ile kümeleme | Tam uygulanmadı |
-| PostGIS `ST_ClusterDBSCAN` | Geometri üzerinde mekansal DBSCAN | Evet |
-| Proje boru hattı | Mekansal DBSCAN + zamansal tekrarlılık + AIS | Evet |
+## Veri
 
----
+Tam veri seti 2020-01 ile 2025-01 arasını kapsar. Hızlı kurulum için Ocak 2025 veri dosyası ayrıca paylaşılacaktır: `traffic_density_202501.csv`.
 
-## Teknoloji
+Dosya, repo klonlandıktan sonra şu konuma yerleştirilmelidir:
 
-| Katman | Teknolojiler |
-|--------|-------------|
-| Veritabanı | PostgreSQL 16+, PostGIS 3.4+ (MobilityDB Docker imajı) |
-| Veri İşleme | Python 3.10+, Pandas, NumPy |
-| Backend | FastAPI, Uvicorn, asyncpg, Pydantic |
-| Frontend | Vanilla JavaScript, Leaflet.js |
-| Altyapı | Docker, Docker Compose |
+```text
+data/raw/ibb_hourly_traffic_density/traffic_density_202501.csv
+```
 
-**Not:** MobilityDB, Docker imajı aracılığıyla kullanılabilir durumdadır ancak mevcut boru hattında aktif olarak kullanılmamaktadır. OSRM harita eşleştirmesi bu boru hattında aktif değildir.
+Bu dosya ana arayüzün tarih/saat filtresi, PostGIS kümeleme akışı ve demo sorgusunu çalıştırmak için yeterlidir.
 
----
+## Ön Koşullar
 
-## Kurulum
+- Git
+- Python 3.10+
+- Docker Desktop
+- Docker Compose
+- İsteğe bağlı: `psql` veya pgAdmin
 
-```bash
-# 1. Çevre değişkenleri
-cp .env.example .env
-# .env dosyasına veritabanı giriş bilgilerini girin
+## Hızlı Kurulum - Ocak 2025 Verisi
 
-# 2. Bağımlılıklar
-pip install -r requirements.txt
+```powershell
+git clone https://github.com/f-nizamioglu/Ibb-Trafik-Analizi.git
+cd Ibb-Trafik-Analizi
 
-# 3. Veritabanı (Docker)
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -r requirements.txt
+
+copy .env.example .env
 docker-compose up -d
-# PostgreSQL/PostGIS, localhost:5433 üzerinde başlar
 ```
 
----
+`traffic_density_202501.csv` dosyasını şu klasöre kopyalayın:
 
-## Boru Hattı
-
-### Tam veri seti indirme (61 aylık, 2020-01 ile 2025-01 arası)
-
-```bash
-# IBB CKAN API üzerinden 61 aylık kaynağı keşfet
-python download_data.py --discover --expected-months 63
-
-# Aylık CSV dosyalarını indir (data/raw/ibb_hourly_traffic_density/)
-python download_data.py --download
-
-# Sadece belirli bir tarih aralığını indir
-python download_data.py --download --start 2022-01 --end 2024-12
-
-# İndirme durumunu görüntüle
-python download_data.py --status --expected-months 63
+```text
+data/raw/ibb_hourly_traffic_density/
 ```
 
-**Not:** Ocak 2025 dosyası (`data/raw/ibb_hourly_traffic_density/traffic_density_202501.csv`) zaten mevcuttur.
-Manifest'e otomatik olarak eklenir, yeniden indirilmez.
+Veriyi içe aktarın ve yardımcı veritabanı nesnelerini oluşturun:
 
-### Veri aktarımı
-
-```bash
-# Tüm mevcut CSV dosyalarını PostgreSQL'e aktar (idempotent)
+```powershell
 python ingest_data.py
-
-# Belirli bir dosyayı aktar
-python ingest_data.py --file data/raw/ibb_hourly_traffic_density/traffic_density_202001.csv
-
-# Aktarım durumunu görüntüle
-python ingest_data.py --status
-```
-
-### 63 aylık kapsam doğrulama
-
-```bash
-python scripts/validate_data_coverage.py --expected-months 63
-```
-
-### Ana pipeline
-
-```bash
-# Tıkanıklık aday filtresi + mekansal indeksler
 python create_views.py
+```
 
-# Mekansal DBSCAN kümeleme + zamansal analiz + AIS skorlama
+`ingest_data.py` PostGIS eklentisini, `ibb_traffic_density` ana tablosunu, temel indeksleri ve `ingested_files` takip tablosunu oluşturur. `create_views.py`, `high_congestion_zones` görünümünü ve eski toplulaştırılmış uç noktalar için boş `traffic_clusters` tablosunu hazırlar.
+
+Ana web arayüzü ve demo endpoint için `run_pipeline.py` gerekli değildir. Legacy küme/statistik uç noktalarını doldurmak için ayrıca çalıştırılabilir:
+
+```powershell
 python run_pipeline.py
 ```
 
-### Boru Hattı Aşamaları
+Uygulamayı başlatın:
 
-| Aşama | Betik | Açıklama |
-|-------|-------|----------|
-| 1 | `download_data.py` | İBB portali scraping, CSV indirme |
-| 2 | `ingest_data.py` | CSV → PostgreSQL, EPSG:32636 geometri dönüşümü |
-| 3 | `create_views.py` | GiST mekansal indeks |
-| 4 | `create_views.py` | `high_congestion_zones` VIEW (statik taban filtresi) |
-| 5 | `run_pipeline.py` | PostGIS `ST_ClusterDBSCAN` mekansal kümeleme |
-| 6 | `run_pipeline.py` | Zamansal tekrarlılık/süre analizi (AIS bileşeni) |
-| 7 | `run_pipeline.py` | AIS skorlama + `cluster_scores.csv` çıktısı |
-| 8 | `uvicorn ...` | FastAPI REST API |
-| 9 | `index.html` | Leaflet.js görselleştirme |
-
----
-
-## API Sunucusunu Başlatma
-
-```bash
+```powershell
 uvicorn backend.app.main:app --reload --port 8000
 ```
 
-- Arayüz: `http://localhost:8000`
-- API Belgelendirme: `http://localhost:8000/docs`
+Tarayıcı:
 
----
+```text
+http://localhost:8000
+```
+
+Demo endpoint:
+
+```text
+http://localhost:8000/api/clusters?date=2025-01-17&hour=18
+```
+
+macOS/Linux için kısa karşılık:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+cp .env.example .env
+```
+
+## Tam Veri Kurulumu
+
+```powershell
+python download_data.py --discover --expected-months 61
+python download_data.py --download
+python ingest_data.py
+python create_views.py
+```
+
+Bu yol tüm veri setini kurar ve uzun sürebilir. Legacy küme/statistik çıktıları için tam veri aktarımından sonra `python run_pipeline.py` çalıştırılabilir.
+
+## Ortam Değişkenleri
+
+`.env.example` yerel Docker/PostGIS kurulumu için beklenen değerleri içerir.
+
+| Değişken | Değer | Açıklama |
+| --- | --- | --- |
+| `DB_HOST` | `localhost` | Backend'in bağlanacağı host. |
+| `DB_PORT` | `5433` | Docker Compose dış portu. |
+| `DB_NAME` | `istanbul_traffic` | PostgreSQL veritabanı. |
+| `DB_USER` | `postgres` | PostgreSQL kullanıcısı. |
+| `DB_PASSWORD` | `postgres` | Yerel PostgreSQL parolası. |
+| `APP_ENV` | `development` | Geliştirme modu. |
+| `ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:8000` | CORS izinleri. |
+
+Uygulama ayrı bir `DATABASE_URL` ortam değişkeni okumaz; bağlantı dizesi bu alanlardan `backend/app/config.py` içinde oluşturulur.
+
+## Web Uygulamasını Çalıştırma
+
+```powershell
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+- Web arayüzü: `http://localhost:8000`
+- Swagger/OpenAPI: `http://localhost:8000/docs`
 
 ## API Uç Noktaları
 
-| Uç Nokta | Açıklama |
-|----------|----------|
-| `GET /api/clusters` | Eski toplulaştırılmış AIS tabanlı kümeleri GeoJSON olarak döner |
-| `GET /api/clusters?severity=HIGH` | Eski toplulaştırılmış kümeleri seviyeye göre filtreler |
-| `GET /api/clusters?date=YYYY-MM-DD&hour=HH` | Seçilen tarih ve saat için saatlik trafik yoğunluk kümelerini döner (`congestion_score` tabanlı) |
-| `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Saatlik kümeleri `HIGH`, `MEDIUM` veya `LOW` seviyesine göre filtreler |
-| `GET /api/clusters/{id}` | Tek küme detayı |
-| `GET /api/stats` | Genel istatistikler |
-| `GET /api/heatmap` | Nokta yoğunluğu; `?date=YYYY-MM-DD` ile filtreli |
-| `GET /api/health` | Servis canlılık kontrolü |
+| Uç nokta | Açıklama |
+| --- | --- |
+| `GET /` | Web arayüzünü döndürür. |
+| `GET /api/health` | Servis ve veritabanı bağlantı durumunu döndürür. |
+| `GET /api/clusters?date=YYYY-MM-DD&hour=HH` | Ana tarih/saat bazlı küme sorgusu. |
+| `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Ana sorguyu `LOW`, `MEDIUM` veya `HIGH` yoğunluk düzeyiyle filtreler. |
+| `GET /api/heatmap` | Isı haritası noktalarını döndürür. |
+| `GET /api/heatmap?date=YYYY-MM-DD` | Isı haritası noktalarını tarihe göre filtreler. |
+| `GET /api/clusters` | Legacy toplulaştırılmış küme çıktısı; `run_pipeline.py` sonrası anlamlıdır. |
+| `GET /api/clusters/{cluster_id}` | Legacy tek küme detayı. |
+| `GET /api/stats` | Legacy istatistik çıktısı; `traffic_clusters` tablosu gerektirir. |
 
-### Saatlik Temporal Kümeleme Modu
+## Yöntem Özeti
 
-Arayüzün kullandığı ana sorgu biçimi:
+Ana endpoint seçilen tarih ve saatten bir saatlik zaman penceresi oluşturur. Bu pencere içinde `avg_speed < 25` koşulunu sağlayan ölçümler alınır. PostGIS `ST_ClusterDBSCAN` fonksiyonu EPSG:32636 metrik geometri üzerinde çalışır. Saatlik akışta kullanılan parametreler `eps=1000` ve `minpoints=2` değerleridir. Haritadaki işaretçiler araç, sensör veya yol segmenti değil, DBSCAN küme merkezleridir. `congestion_score` kullanıcı arayüzü için hesaplanan yoğunluk/görselleştirme skorudur.
+
+## Test ve Kontrol
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest tests -q
+python -c "from backend.app.main import app; print('app import ok')"
+docker-compose --env-file .env.example config
+```
+
+Sunucu çalışırken:
 
 ```text
-/api/clusters?date=2025-01-17&hour=18
+http://localhost:8000/api/health
+http://localhost:8000/api/clusters?date=2025-01-17&hour=18
 ```
 
-- `date` değeri `YYYY-MM-DD` biçiminde olmalı ve veri aralığı olan `2020-01-01` ile `2025-01-31` arasında seçilmelidir.
-- `hour` değeri 0-23 arasında bir tam sayı olmalıdır.
-- `severity` isteğe bağlıdır ve `HIGH`, `MEDIUM` veya `LOW` olabilir.
-- Temporal mod tek bir saatlik kesit üzerinde PostGIS mekansal DBSCAN çalıştırır.
-- Temporal moddaki yoğunluk düzeyi, hız düşüşü + saatlik araç hacmi + küme kapsamından türetilen `congestion_score` (0-100) ile belirlenir; yalnızca ortalama hıza dayalı değildir.
-- Harita işaretçileri DBSCAN küme merkezleridir; birebir sensör veya araç konumu değildir.
-- Yol uzunluğu tabanlı yoğunluk normalizasyonu deneysel katmandadır ve canlı endpoint'te kullanılmaz.
+## Sorun Giderme
 
----
+| Sorun | Kontrol |
+| --- | --- |
+| Docker çalışmıyor | Docker Desktop'ı başlatıp `docker-compose up -d` komutunu tekrar çalıştırın. |
+| `.env` eksik | `copy .env.example .env` komutunu çalıştırın. |
+| Veritabanı boş | CSV dosyasının doğru klasörde olduğundan emin olun ve `python ingest_data.py` çalıştırın. |
+| CSV bulunamıyor | Dosya adı `traffic_density_202501.csv`, klasör `data/raw/ibb_hourly_traffic_density/` olmalıdır. |
+| `5433` portu dolu | Portu kullanan servisi kapatın veya Docker port ayarını değiştirin. |
+| Harita boş | Veri içe aktarılmamış olabilir veya seçilen saat için küme bulunmayabilir. |
+| İlk sorgu yavaş | Büyük veri ve PostGIS kümeleme nedeniyle ilk sorgu daha uzun sürebilir. |
 
-## Deneyler
+## Kısıtlar
 
-```bash
-# Parametre duyarlılık analizi
-python experiments/parameter_sensitivity.py
-
-# Geohash hücre yoğunluk prototipi (alan tabanlı yaklaşım, deneysel)
-python experiments/dynamic_density.py
-
-# Yol ağı yoğunluk karşılaştırması (bkz. aşağıdaki kurulum adımları)
-python experiments/road_density.py
-
-# Grafik üretimi (CSV çıktısı gerektirir)
-python experiments/generate_charts.py
-```
-
----
-
-## Yol Ağı Tabanlı Yoğunluk Filtresi (Opsiyonel)
-
-Statik filtre (`avg_speed < 20, vehicle_count > 500`) varsayılan olarak kullanılır. Yol uzunluğu tabanlı gerçek yoğunluk filtrelemesi için aşağıdaki adımlar izlenir:
-
-### 1. Gereksinimler
-
-```bash
-pip install geopandas>=1.0 pyogrio>=0.7
-```
-
-### 2. İstanbul OSM Verisi İndir
-
-```
-https://download.bbbike.org/osm/bbbike/Istanbul/Istanbul.osm.pbf
-```
-
-Dosyayı şuraya kaydet: `data/road_network/Istanbul.osm.pbf` (~75 MB)
-
-### 3. Yol Ağı Şemasını Oluştur
-
-```bash
-python scripts/create_road_schema.py
-```
-
-Bu komut şunları oluşturur:
-- `road_segments` tablosu
-- `geohash_cells` tablosu (ibb_traffic_density geohash'larından)
-- `geohash_road_lengths` materialized view (PostGIS ST_Intersection ile)
-- `road_density_base` view (vehicles_per_road_km hesabı)
-- `road_density_congestion_candidates` view (yüzdelik dilim tabanlı dinamik filtre)
-
-### 4. Yol Segmentlerini Aktar
-
-```bash
-python scripts/import_road_network.py --input data/road_network/Istanbul.osm.pbf
-```
-
-Araç yollarını (`motorway`, `trunk`, `primary`, `secondary`, `tertiary`, `residential`, vb.) filtreler ve matview'ı günceller.
-
-### 5. Yöntemi Etkinleştir
-
-`.env` dosyasında:
-```
-DENSITY_FILTER_METHOD=road_length
-ROAD_DENSITY_PERCENTILE_THRESHOLD=75.0
-```
-
-Seçenekler: `static` | `geohash_area` | `road_length`
-
----
-
-## Testler
-
-```bash
-pip install pytest httpx  # geliştirme bağımlılıkları
-python -m pytest tests/ -v
-```
-
----
-
-## Dizin Yapısı
-
-```
-.
-├── backend/app/          FastAPI uygulaması, rotalar, servisler, modeller
-├── data/road_network/    OSM PBF dosyası için yer tutucu (.gitignore, yalnızca .gitkeep)
-├── experiments/          Parametre duyarlılık ve yoğunluk karşılaştırma deneyleri
-├── legacy/               Arşivlenmiş eski Python tabanlı implementasyon
-├── outputs/experiments/  Deney CSV ve MD çıktıları (.gitignore hariç)
-├── scoring/              AIS motoru + geohash yardımcı araçları
-├── scripts/              Yol ağı şema ve aktarım betikleri
-├── tests/                pytest test paketi
-├── config.py             Merkezi yapılandırma (.env üzerinden)
-├── create_views.py       Mekansal indeks + aday filtre VIEW
-├── download_data.py      İBB portal scraping
-├── ingest_data.py        CSV → PostGIS aktarımı
-├── index.html            Leaflet.js harita arayüzü
-└── run_pipeline.py       Ana boru hattı orkestratörü
-```
-
----
-
-## Kısıtlamalar
-
-- Tam ε₂ tabanlı ST-DBSCAN uygulanmamıştır; zamansal boyut kümeleme sonrası AIS aracılığıyla ele alınmaktadır.
-- MobilityDB Docker imajı üzerinden kullanılabilir durumdadır; ancak aktif boru hattında MobilityDB fonksiyonları kullanılmamaktadır.
-- OSRM harita eşleştirmesi mevcut boru hattında aktif değildir.
-- Geohash yoğunluk filtresi (`geohash_area`) deneysel prototip seviyesindedir ve alan tabanlı yaklaşıma dayanmaktadır.
-- Yol uzunluğu tabanlı yoğunluk (`road_length`) OSM PBF dosyasının manuel olarak indirilmesini gerektirir; bu dosya depoda yer almamaktadır.
-- OSM çift yönlü yollar yol uzunluğunu çift sayabilir; bu durum sınırlılık olarak belgelenmiştir.
-- Parametre deneyleri (`experiments/`) veritabanının çalışır durumda ve verisinin yüklenmiş olmasını gerektirmektedir.
+- Tam ST-DBSCAN uygulanmamıştır.
+- MobilityDB temporal fonksiyonları aktif sorgu yolunda kullanılmaz.
+- Sistem geçmiş veri görselleştirmesidir, canlı trafik sistemi değildir.
+- Rota tahmini veya rota optimizasyonu yapmaz.
+- Ground-truth anomali etiketi üretmez.

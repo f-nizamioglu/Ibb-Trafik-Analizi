@@ -1,22 +1,20 @@
 services:
-  # ─── PostgreSQL with PostGIS + MobilityDB ────────────────────────────────
   db:
     image: mobilitydb/mobilitydb:latest
     container_name: istanbul_mobilitydb
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ${DB_NAME:-istanbul_traffic}
     ports:
       - "5433:5432"
     volumes:
       - istanbul_mobilitydb_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-istanbul_traffic}"]
       interval: 10s
       timeout: 5s
       retries: 5
-
 
 volumes:
   istanbul_mobilitydb_data:

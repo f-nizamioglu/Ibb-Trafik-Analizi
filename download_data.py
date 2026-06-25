@@ -571,8 +571,8 @@ def main() -> None:
     parser.add_argument("--limit", type=int, metavar="N", help="Limit to N downloads")
     parser.add_argument("--force", action="store_true",
                         help="Re-download even if file already exists")
-    parser.add_argument("--expected-months", type=int, default=63, metavar="N",
-                        help="Expected number of monthly files (default: 63, warn if different)")
+    parser.add_argument("--expected-months", type=int, default=61, metavar="N",
+                        help="Expected number of monthly files (default: 61, warn if different)")
 
     args = parser.parse_args()
 

@@ -6,7 +6,7 @@ relative to an expected total. Suitable for thesis/report validation.
 
 Usage:
     python scripts/validate_data_coverage.py
-    python scripts/validate_data_coverage.py --expected-months 63
+    python scripts/validate_data_coverage.py --expected-months 61
     python scripts/validate_data_coverage.py --start 2020-01 --end 2025-01
 """
 

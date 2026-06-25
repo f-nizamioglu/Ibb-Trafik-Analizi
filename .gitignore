@@ -1,11 +1,9 @@
-# ─── Secrets ───
+# Secrets and local configuration
 .env
+.env.*
+!.env.example
 
-*.pdf
-
-*.tex
-
-# ─── Python ───
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -13,50 +11,84 @@ dist/
 build/
 .venv/
 venv/
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
 
-# ─── Data (too large for Git) ───
-ibb_trafik_verileri/
-osrm-data/
-*.gpkg
-*.qgz
-
-# ─── Raw downloaded traffic CSVs (too large for Git) ───
+# Data and generated database artifacts
+data/download_manifest.json
+_ckan_resources.json
 data/raw/ibb_hourly_traffic_density/*.csv
+data/raw/ibb_hourly_traffic_density/*.zip
+data/raw/ibb_hourly_traffic_density/*.gz
 !data/raw/ibb_hourly_traffic_density/.gitkeep
-
-# ─── Experiment and pipeline output CSVs ───
-cluster_scores.csv
-outputs/experiments/*.csv
-
-# ─── Road network raw data (too large for Git) ───
 data/road_network/*
 !data/road_network/.gitkeep
+*.csv.gz
+*.dump
+*.backup
+*.sql
+*.sql.gz
+*.db
+
+# Road network raw/geospatial files
 *.osm.pbf
 *.osm.gz
+*.gpkg
+*.qgz
 *.shp
 *.dbf
 *.shx
 *.prj
 
-# ─── IDE ───
+# Generated outputs, reports, and scratch artifacts
+outputs/
+experiments/
+figures/experiments/
+legacy/
+logs/
+cluster_scores.csv
+*.log
+*.tmp
+*.bak
+*.md
+!README.md
+*.tex
+*.bib
+*.pdf
+ilerleme*
+rapor*
+report*
+docs/demo/
+
+# Local screenshots, recordings, and media captures
+screenshots/
+recordings/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.obs
+
+# AI/editor/local agent artifacts
+CLAUDE.md
+.claude/
+.codex/
+codex*
+chatgpt*
+prompt*
+antigravity-*.patch
+antigravity-*.txt
+
+# IDE and OS files
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# ─── Experiment outputs (generated, not source) ───
-outputs/experiments/*.csv
-outputs/experiments/*.png
-outputs/experiments/*.md
-
-# ─── AI agent directives (local only, not for repo) ───
-CLAUDE.md
-.claude/
-
-# ─── Session agent artefacts ───
-antigravity-*.patch
-antigravity-*.txt
-
-# ─── OS ───
 Thumbs.db
 .DS_Store

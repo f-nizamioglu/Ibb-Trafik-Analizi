@@ -322,7 +322,7 @@ ORDER BY sum_vehicle_count DESC;
     max_speed=_TEMPORAL_MAX_AVG_SPEED,
 )
 
-# Volume gates derived from 2025-01-17 hourly audit (cluster sum_vehicle_count).
+# Volume gates derived from 2025-01-17 hourly validation (cluster sum_vehicle_count).
 # Hour 18 peak cluster ~15k vehicles; hour 23 peak ~1.9k; smallest meaningful
 # HIGH candidate had 191 vehicles at 14.5 km/h.
 _HIGH_ABS_MIN_VOLUME = 500

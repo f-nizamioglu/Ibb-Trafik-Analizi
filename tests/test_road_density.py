@@ -93,45 +93,6 @@ def test_vehicles_per_road_km_null_road_length():
 
 # ── Road density candidate selection ─────────────────────────────────────────
 
-def _make_road_rows(data: list[tuple[str, float, float]]) -> list[dict]:
-    """Build minimal road_density rows: (geohash, vehicles_per_road_km, avg_speed)."""
-    return [
-        {"geohash": gh, "vehicles_per_road_km": vpk, "avg_avg_speed": sp}
-        for gh, vpk, sp in data
-    ]
-
-
-def test_road_density_percentile_selection():
-    """75th percentile should select top 25% of cells."""
-    from experiments.road_density import _compute_road_density_candidates
-    rows = _make_road_rows([
-        ("sxk1", 1000.0, 10.0),
-        ("sxk2",  500.0, 12.0),
-        ("sxk3",  250.0, 15.0),
-        ("sxk4",  100.0, 18.0),
-    ])
-    selected, threshold = _compute_road_density_candidates(rows, percentile=75)
-    assert "sxk1" in selected
-    assert threshold > 0
-
-
-def test_road_density_empty_input():
-    """Empty input returns empty set and zero threshold."""
-    from experiments.road_density import _compute_road_density_candidates
-    selected, threshold = _compute_road_density_candidates([], percentile=75)
-    assert selected == set()
-    assert threshold == 0.0
-
-
-def test_road_density_null_vpk_excluded():
-    """Rows with None vehicles_per_road_km should not affect threshold."""
-    from experiments.road_density import _compute_road_density_candidates
-    rows = _make_road_rows([("sxk1", 1000.0, 10.0)])
-    rows.append({"geohash": "sxk9", "vehicles_per_road_km": None, "avg_avg_speed": 5.0})
-    selected, threshold = _compute_road_density_candidates(rows, percentile=50)
-    assert "sxk9" not in selected
-
-
 # ── Import script clean failure ───────────────────────────────────────────────
 
 def test_import_script_missing_file(tmp_path):
