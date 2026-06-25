@@ -17,6 +17,104 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+@pytest.fixture
+def temporal_cluster_client(monkeypatch):
+    """FastAPI test client with temporal cluster retrieval stubbed."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.models.cluster import TemporalClusterResponse
+    from backend.app.routers import clusters as clusters_router
+
+    calls = []
+
+    async def fake_get_temporal_clusters(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return TemporalClusterResponse(
+            date=args[0],
+            hour=args[1],
+            cluster_count=0,
+            features=[],
+        )
+
+    monkeypatch.setattr(
+        clusters_router,
+        "get_temporal_clusters",
+        fake_get_temporal_clusters,
+    )
+
+    app = FastAPI()
+    app.include_router(clusters_router.router, prefix="/api")
+
+    with TestClient(app) as client:
+        yield client, calls
+
+
+def test_temporal_clusters_without_bbox_still_uses_existing_call(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "FeatureCollection"
+    assert data["date"] == "2025-01-17"
+    assert data["hour"] == 18
+    assert calls == [{"args": ("2025-01-17", 18), "kwargs": {}}]
+
+
+def test_temporal_clusters_accepts_full_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {"bbox": (28.95, 41.02, 29.08, 41.10)},
+        }
+    ]
+
+
+def test_temporal_clusters_rejects_partial_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&min_lon=28.95")
+
+    assert r.status_code == 400
+    assert "All bbox parameters" in r.json()["detail"]
+    assert calls == []
+
+
+def test_temporal_clusters_rejects_inverted_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&min_lon=29.08&min_lat=41.02&max_lon=28.95&max_lat=41.10"
+    )
+
+    assert r.status_code == 400
+    assert "min_lon" in r.json()["detail"]
+    assert calls == []
+
+
+def test_temporal_clusters_invalid_bbox_range_returns_422(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&min_lon=-181&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 422
+    assert calls == []
+
+
 # ── AIS in cluster_service ───────────────────────────────────────────────────
 
 def test_service_ais_empty():

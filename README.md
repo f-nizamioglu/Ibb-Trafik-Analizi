@@ -185,12 +185,34 @@ uvicorn backend.app.main:app --reload --port 8000
 | `GET /` | Web arayüzünü döndürür. |
 | `GET /api/health` | Servis ve veritabanı bağlantı durumunu döndürür. |
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH` | Ana tarih/saat bazlı küme sorgusu. |
+| `GET /api/clusters?date=YYYY-MM-DD&hour=HH&min_lon=...&min_lat=...&max_lon=...&max_lat=...` | Ana tarih/saat sorgusunu WGS84 dikdörtgen bbox alanıyla sınırlar. |
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Ana sorguyu `LOW`, `MEDIUM` veya `HIGH` yoğunluk düzeyiyle filtreler. |
 | `GET /api/heatmap` | Isı haritası noktalarını döndürür. |
 | `GET /api/heatmap?date=YYYY-MM-DD` | Isı haritası noktalarını tarihe göre filtreler. |
 | `GET /api/clusters` | Legacy toplulaştırılmış küme çıktısı; `run_pipeline.py` sonrası anlamlıdır. |
 | `GET /api/clusters/{cluster_id}` | Legacy tek küme detayı. |
 | `GET /api/stats` | Legacy istatistik çıktısı; `traffic_clusters` tablosu gerektirir. |
+
+## Bölge Analizi (Bölgesel Filtreleme)
+
+Arayüzdeki **Bölge Analizi** bölümü, tarih/saat sorgusunu belirli bir alanla sınırlamak için dört kapsam sunar. Tüm bölgesel modlar aynı opsiyonel WGS84 dikdörtgen (bbox) parametrelerine (`min_lon`, `min_lat`, `max_lon`, `max_lat`) çevrilir; ölçeklendirme tamamen ön yüzde yapılır ve backend yalnızca bbox parametrelerini bilir.
+
+- **Tüm İstanbul** (varsayılan): bbox parametresi gönderilmez. Seçili dikdörtgen kaldırılır, ilçe seçimi sıfırlanır ve kapsam metni `Kapsam: Tüm İstanbul` olur. Bu mod mevcut `/api/clusters?date=YYYY-MM-DD&hour=HH` davranışını değiştirmeden korur.
+- **Harita Görünümü**: o anki görünür harita sınırları (`map.getBounds()`) bbox olarak gönderilir. Kaydırma/yakınlaştırma otomatik yeni istek tetiklemez; kullanıcı **Yenile** düğmesine basınca güncel sınırlar yeniden alınır. Kapsam metni: `Kapsam: Harita görünümü`.
+- **Dikdörtgen Seç**: kullanıcı haritada fareyle sürükleyerek bir dikdörtgen çizer (yalnızca Leaflet `L.rectangle` ve `mousedown`/`mousemove`/`mouseup` kullanılır; harici eklenti yoktur). Çizim sırasında istek atılmaz; seçili dikdörtgen haritada kalır ve **Seçili Alanı Analiz Et** düğmesine basıldığında bbox sorgusu çalışır. Kapsam metni: `Kapsam: Seçili dikdörtgen alan` ve seçilen alanın koordinatları panelde gösterilir.
+- **İlçe ön ayarı**: `Beşiktaş`, `Kadıköy`, `Şişli`, `Üsküdar`, `Fatih`, `Bakırköy`, `Ataşehir`, `Maltepe`, `Pendik`, `Sarıyer` ilçeleri için yaklaşık dikdörtgen (bbox) ön ayarları tanımlıdır. İlçe seçildiğinde dikdörtgen haritaya çizilir, harita o alana sığdırılır ve bbox sorgusu çalışır. Kapsam metni örn. `Kapsam: Beşiktaş ilçesi (yaklaşık dikdörtgen alan)`.
+
+> **Not:** İlçe ön ayarları gerçek idari sınır poligonları değil, **yaklaşık dikdörtgen (bbox) yaklaşımıdır**. Depoda kesin ilçe poligon verisi bulunmadığı için bbox kullanılır; ileride OSM/idari sınır poligonları eklenirse bu modlar gerçek poligon kesişimine (`ST_Intersects`) yükseltilebilir.
+
+Bölge panelinde aktif kapsam, sorgu türü (`Tarih/saat + tüm alan` veya `Tarih/saat + bbox`) ve varsa bbox koordinatları gösterilir. Dört metrik kartı her zaman **aktif kapsam** için hesaplanır.
+
+Örnek bbox endpoint'i:
+
+```text
+/api/clusters?date=2025-01-17&hour=18&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10
+```
+
+`min_lon`, `min_lat`, `max_lon` ve `max_lat` koordinatları WGS84 longitude/latitude değerleridir. Bu dört parametre birlikte verildiğinde sistem seçilen bir saatlik pencereyi bu dikdörtgen alanla sınırlar, ardından mevcut `avg_speed < 25` ve PostGIS `ST_ClusterDBSCAN` akışını aynı şekilde çalıştırır. Yoğunluk düzeyi (`severity=HIGH|MEDIUM|LOW`) filtresi bbox ile birlikte kullanılabilir.
 
 ## Yöntem Özeti
 

@@ -322,6 +322,44 @@ ORDER BY sum_vehicle_count DESC;
     max_speed=_TEMPORAL_MAX_AVG_SPEED,
 )
 
+_TEMPORAL_CLUSTER_SQL_WITH_BBOX = """
+SELECT
+    cluster_id,
+    COUNT(*)::int                                                   AS point_count,
+    SUM(vehicle_count)::int                                         AS sum_vehicle_count,
+    AVG(vehicle_count)::float                                       AS avg_vehicle_count,
+    AVG(avg_speed)::float                                           AS avg_speed_kmh,
+    MIN(avg_speed)::float                                           AS min_speed_kmh,
+    MAX(avg_speed)::float                                           AS max_speed_kmh,
+    ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lat,
+    ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lon
+FROM (
+    SELECT
+        vehicle_count,
+        avg_speed,
+        geom,
+        COALESCE(
+            ST_ClusterDBSCAN(geom, eps := {eps}, minpoints := {minpts}) OVER (),
+            -1
+        ) AS cluster_id
+    FROM ibb_traffic_density
+    WHERE record_time >= $1::timestamp
+      AND record_time <  $2::timestamp
+      AND avg_speed < {max_speed}
+      AND ST_Intersects(
+          geom,
+          ST_Transform(ST_MakeEnvelope($3, $4, $5, $6, 4326), 32636)
+      )
+) sub
+WHERE cluster_id >= 0
+GROUP BY cluster_id
+ORDER BY sum_vehicle_count DESC;
+""".format(
+    eps=_TEMPORAL_EPS_METERS,
+    minpts=_TEMPORAL_MINPOINTS,
+    max_speed=_TEMPORAL_MAX_AVG_SPEED,
+)
+
 # Volume gates derived from 2025-01-17 hourly validation (cluster sum_vehicle_count).
 # Hour 18 peak cluster ~15k vehicles; hour 23 peak ~1.9k; smallest meaningful
 # HIGH candidate had 191 vehicles at 14.5 km/h.
@@ -496,7 +534,11 @@ def assign_hourly_severity(avg_speed_kmh: float) -> str:
     return "LOW"
 
 
-async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResponse:
+async def get_temporal_clusters(
+    date_str: str,
+    hour: int,
+    bbox: tuple[float, float, float, float] | None = None,
+) -> TemporalClusterResponse:
     """Run spatial DBSCAN on a single-hour slice and return clustered GeoJSON.
 
     Parameters
@@ -505,6 +547,8 @@ async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResp
         Date in YYYY-MM-DD format.
     hour : int
         Hour of day (0-23).
+    bbox : tuple[float, float, float, float], optional
+        WGS84 bbox as min_lon, min_lat, max_lon, max_lat.
 
     Returns
     -------
@@ -528,7 +572,18 @@ async def get_temporal_clusters(date_str: str, hour: int) -> TemporalClusterResp
     pool = await get_pool()
     t0 = time.monotonic()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(_TEMPORAL_CLUSTER_SQL, start_ts, end_ts)
+        if bbox is None:
+            rows = await conn.fetch(_TEMPORAL_CLUSTER_SQL, start_ts, end_ts)
+        else:
+            rows = await conn.fetch(
+                _TEMPORAL_CLUSTER_SQL_WITH_BBOX,
+                start_ts,
+                end_ts,
+                bbox[0],
+                bbox[1],
+                bbox[2],
+                bbox[3],
+            )
     elapsed_ms = (time.monotonic() - t0) * 1000
 
     logger.info(

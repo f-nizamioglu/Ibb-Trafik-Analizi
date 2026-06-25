@@ -55,6 +55,30 @@ async def list_clusters(
         description="Filter by severity level: LOW, MEDIUM, or HIGH",
         pattern="^(LOW|MEDIUM|HIGH)$",
     ),
+    min_lon: Optional[float] = Query(
+        None,
+        description="Minimum longitude for optional WGS84 bbox filter.",
+        ge=-180,
+        le=180,
+    ),
+    min_lat: Optional[float] = Query(
+        None,
+        description="Minimum latitude for optional WGS84 bbox filter.",
+        ge=-90,
+        le=90,
+    ),
+    max_lon: Optional[float] = Query(
+        None,
+        description="Maximum longitude for optional WGS84 bbox filter.",
+        ge=-180,
+        le=180,
+    ),
+    max_lat: Optional[float] = Query(
+        None,
+        description="Maximum latitude for optional WGS84 bbox filter.",
+        ge=-90,
+        le=90,
+    ),
 ):
     """
     Get traffic anomaly clusters as GeoJSON.
@@ -69,10 +93,38 @@ async def list_clusters(
     Returns cached historical aggregate clusters with AIS scoring.
     Kept for backward compatibility.
     """
+    bbox_values = (min_lon, min_lat, max_lon, max_lat)
+    bbox_flags = [value is not None for value in bbox_values]
+    if any(bbox_flags) and not all(bbox_flags):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "All bbox parameters must be provided together: "
+                "min_lon, min_lat, max_lon, max_lat."
+            ),
+        )
+
+    bbox = None
+    if all(bbox_flags):
+        if min_lon >= max_lon:
+            raise HTTPException(
+                status_code=400,
+                detail="'min_lon' must be less than 'max_lon'.",
+            )
+        if min_lat >= max_lat:
+            raise HTTPException(
+                status_code=400,
+                detail="'min_lat' must be less than 'max_lat'.",
+            )
+        bbox = (min_lon, min_lat, max_lon, max_lat)
+
     # ── Temporal mode ─────────────────────────────────────────────────
     if date is not None and hour is not None:
         try:
-            result = await get_temporal_clusters(date, hour)
+            if bbox is None:
+                result = await get_temporal_clusters(date, hour)
+            else:
+                result = await get_temporal_clusters(date, hour, bbox=bbox)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -117,6 +169,12 @@ async def list_clusters(
         raise HTTPException(
             status_code=400,
             detail="Both 'date' and 'hour' must be provided for temporal mode.",
+        )
+
+    if bbox is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Bbox filtering requires both 'date' and 'hour' parameters.",
         )
 
     # ── Legacy mode (backward compatible) ─────────────────────────────
