@@ -1,6 +1,10 @@
 # Zaman-Uzamsal Verilerle Trafik Yoğunluğu Analizi ve Görselleştirme Web Portalı
 
-Bu depo, YTÜ Bilgisayar Mühendisliği bitirme projesi için hazırlanmıştır. Proje, İstanbul Büyükşehir Belediyesi saatlik trafik yoğunluğu verisini kullanır. FastAPI, PostgreSQL/PostGIS ve Leaflet.js ile tarih/saat seçimine göre trafik yoğunluğu kümelerini harita üzerinde gösterir. Kullanıcı bir tarih ve saat seçer; sistem ilgili bir saatlik aralıktaki düşük hızlı ölçümleri filtreleyip PostGIS ile mekansal kümeleme yapar. Uygulama geçmiş veriyi görselleştirir; trafik tahmini, rota optimizasyonu veya gerçek zamanlı trafik yönetimi yapmaz.
+Bu depo, YTÜ Bilgisayar Mühendisliği bitirme projesi için hazırlanmıştır. Proje, İstanbul Büyükşehir Belediyesi saatlik trafik yoğunluğu verisini kullanır.
+
+FastAPI, PostgreSQL/PostGIS ve Leaflet.js ile tarih/saat seçimine göre trafik yoğunluğu kümelerini harita üzerinde gösterir. Kullanıcı bir tarih ve saat seçer; sistem ilgili bir saatlik aralıktaki düşük hızlı ölçümleri filtreleyip PostGIS ile mekansal kümeleme yapar.
+
+Uygulama geçmiş veriyi görselleştirir; trafik tahmini, rota optimizasyonu veya gerçek zamanlı trafik yönetimi yapmaz.
 
 ## Projenin Yaptıkları ve Yapmadıkları
 
@@ -102,7 +106,9 @@ python ingest_data.py
 python create_views.py
 ```
 
-`ingest_data.py` PostGIS eklentisini, `ibb_traffic_density` ana tablosunu, temel indeksleri ve `ingested_files` takip tablosunu oluşturur. `create_views.py`, `high_congestion_zones` görünümünü ve eski toplulaştırılmış uç noktalar için boş `traffic_clusters` tablosunu hazırlar.
+`ingest_data.py` PostGIS eklentisini, `ibb_traffic_density` ana tablosunu, temel indeksleri ve `ingested_files` takip tablosunu oluşturur.
+
+`create_views.py`, `high_congestion_zones` görünümünü ve eski toplulaştırılmış uç noktalar için boş `traffic_clusters` tablosunu hazırlar.
 
 Ana web arayüzü ve demo endpoint için `run_pipeline.py` gerekli değildir. Legacy küme/statistik uç noktalarını doldurmak için ayrıca çalıştırılabilir:
 
@@ -188,7 +194,9 @@ uvicorn backend.app.main:app --reload --port 8000
 
 ## Yöntem Özeti
 
-Ana endpoint seçilen tarih ve saatten bir saatlik zaman penceresi oluşturur. Bu pencere içinde `avg_speed < 25` koşulunu sağlayan ölçümler alınır. PostGIS `ST_ClusterDBSCAN` fonksiyonu EPSG:32636 metrik geometri üzerinde çalışır. Saatlik akışta kullanılan parametreler `eps=1000` ve `minpoints=2` değerleridir. Haritadaki işaretçiler araç, sensör veya yol segmenti değil, DBSCAN küme merkezleridir. `congestion_score` kullanıcı arayüzü için hesaplanan yoğunluk/görselleştirme skorudur.
+Ana endpoint seçilen tarih ve saatten bir saatlik zaman penceresi oluşturur. Bu pencere içinde `avg_speed < 25` koşulunu sağlayan ölçümler alınır. PostGIS `ST_ClusterDBSCAN` fonksiyonu EPSG:32636 metrik geometri üzerinde çalışır.
+
+Saatlik akışta kullanılan parametreler `eps=1000` ve `minpoints=2` değerleridir. Haritadaki işaretçiler araç, sensör veya yol segmenti değil, DBSCAN küme merkezleridir. `congestion_score` kullanıcı arayüzü için hesaplanan yoğunluk/görselleştirme skorudur.
 
 ## Test ve Kontrol
 
