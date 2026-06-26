@@ -22,12 +22,16 @@ from backend.app.models.cluster import (
     TemporalClusterResponse,
 )
 from backend.app.services.cluster_service import (
+    DistrictBoundariesNotImported,
+    UnknownDistrict,
     build_geojson,
     compute_ais_and_severity,
     get_cached_cluster_summaries,
+    get_district_boundary,
     get_global_stats,
     get_temporal_clusters,
 )
+from backend.app.services.district_utils import normalize_district_key
 
 router = APIRouter()
 
@@ -79,6 +83,14 @@ async def list_clusters(
         ge=-90,
         le=90,
     ),
+    district: Optional[str] = Query(
+        None,
+        description=(
+            "Optional district key (e.g. 'besiktas') to filter by the real "
+            "district polygon. Requires 'date' and 'hour'; mutually exclusive "
+            "with the bbox parameters."
+        ),
+    ),
 ):
     """
     Get traffic anomaly clusters as GeoJSON.
@@ -88,6 +100,12 @@ async def list_clusters(
     ibb_traffic_density. Uses hourly-tuned parameters (eps=1000m,
     minpoints=2, avg_speed<25). Severity uses congestion_score combining
     speed drop, hourly vehicle volume, and cluster coverage.
+
+    **Region filters** (temporal mode only): an optional WGS84 bbox
+    (min_lon/min_lat/max_lon/max_lat) or a `district` key may be supplied to
+    restrict the analysis to a sub-area. bbox and district are mutually
+    exclusive; in both cases filtering happens BEFORE DBSCAN, so clusters are
+    recalculated on the selected subset.
 
     **Legacy mode** (no date/hour):
     Returns cached historical aggregate clusters with AIS scoring.
@@ -118,13 +136,34 @@ async def list_clusters(
             )
         bbox = (min_lon, min_lat, max_lon, max_lat)
 
+    # ── District param (real polygon mode) ────────────────────────────
+    district_key = None
+    if district is not None:
+        # Normalize identically to the import script so Turkish-cased names
+        # (e.g. "Beşiktaş") map to the stored key ("besiktas").
+        district_key = normalize_district_key(district)
+        if not district_key:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' must be a non-empty value.",
+            )
+        if bbox is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' and bbox parameters are mutually exclusive.",
+            )
+
     # ── Temporal mode ─────────────────────────────────────────────────
     if date is not None and hour is not None:
         try:
-            if bbox is None:
+            if district_key is not None:
+                result = await get_temporal_clusters(date, hour, district=district_key)
+            elif bbox is None:
                 result = await get_temporal_clusters(date, hour)
             else:
                 result = await get_temporal_clusters(date, hour, bbox=bbox)
+        except DistrictBoundariesNotImported as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -177,6 +216,12 @@ async def list_clusters(
             detail="Bbox filtering requires both 'date' and 'hour' parameters.",
         )
 
+    if district_key is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="District filtering requires both 'date' and 'hour' parameters.",
+        )
+
     # ── Legacy mode (backward compatible) ─────────────────────────────
     clusters = await get_cached_cluster_summaries()
     if not clusters:
@@ -212,6 +257,27 @@ async def get_cluster(request: Request, cluster_id: int):
         )
 
     return build_geojson(matched)
+
+
+@router.get("/districts/{district_key}/boundary")
+@limiter.limit("60/minute")
+async def district_boundary(request: Request, district_key: str):
+    """
+    Return the imported district polygon boundary as a WGS84 GeoJSON Feature.
+
+    Used by the frontend to draw the real district outline on the map. The
+    geometry comes from istanbul_district_boundaries (transformed to EPSG:4326);
+    the local GeoJSON source file is never read or exposed here.
+    """
+    key = normalize_district_key(district_key)
+    if not key:
+        raise HTTPException(status_code=400, detail="Unknown district")
+    try:
+        return await get_district_boundary(key)
+    except DistrictBoundariesNotImported as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UnknownDistrict as exc:
+        raise HTTPException(status_code=404, detail="Unknown district") from exc
 
 
 @router.get("/stats", response_model=StatsResponse)

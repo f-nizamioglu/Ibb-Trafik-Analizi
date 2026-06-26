@@ -9,6 +9,7 @@ for Leaflet.js consumption via ST_Transform.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import time
@@ -31,6 +32,22 @@ from backend.app.models.cluster import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Message shown when district filtering is requested but the boundary table is
+# missing or empty. Kept as a module constant so the API and tests stay in sync.
+DISTRICT_NOT_IMPORTED_MSG = (
+    "District boundaries are not imported. "
+    "Run python scripts/import_district_boundaries.py."
+)
+
+
+class DistrictBoundariesNotImported(RuntimeError):
+    """Raised when district filtering is requested but no boundaries are loaded."""
+
+
+class UnknownDistrict(ValueError):
+    """Raised when a requested district key is not present in the boundary table."""
+
 
 # ── Cache ──────────────────────────────────────────────────────────────────
 _cache: dict = {}
@@ -360,6 +377,62 @@ ORDER BY sum_vehicle_count DESC;
     max_speed=_TEMPORAL_MAX_AVG_SPEED,
 )
 
+# District mode: filter the one-hour slice by the real district polygon BEFORE
+# DBSCAN, then cluster the district subset. The polygon comes from
+# istanbul_district_boundaries (EPSG:32636, same as ibb_traffic_density.geom).
+#
+# The one-hour window (~2.5k rows) is by far the most selective filter, so we
+# force it to run first via a MATERIALIZED CTE driven by the record_time index.
+# Without MATERIALIZED, the planner mis-estimates the spatial join and drives
+# off the GiST index instead, scanning the whole table's history for the
+# district bbox and timing out. The district polygon is materialized once and
+# the && / ST_Intersects pair then refines the small hour slice.
+_TEMPORAL_CLUSTER_SQL_WITH_DISTRICT = """
+WITH hour_slice AS MATERIALIZED (
+    SELECT vehicle_count, avg_speed, geom
+    FROM ibb_traffic_density
+    WHERE record_time >= $1::timestamp
+      AND record_time <  $2::timestamp
+      AND avg_speed < {max_speed}
+),
+dist AS MATERIALIZED (
+    SELECT geom
+    FROM istanbul_district_boundaries
+    WHERE district_key = $3
+)
+SELECT
+    cluster_id,
+    COUNT(*)::int                                                   AS point_count,
+    SUM(vehicle_count)::int                                         AS sum_vehicle_count,
+    AVG(vehicle_count)::float                                       AS avg_vehicle_count,
+    AVG(avg_speed)::float                                           AS avg_speed_kmh,
+    MIN(avg_speed)::float                                           AS min_speed_kmh,
+    MAX(avg_speed)::float                                           AS max_speed_kmh,
+    ST_Y(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lat,
+    ST_X(ST_Transform(ST_Centroid(ST_Collect(geom)), 4326))::float  AS centroid_lon
+FROM (
+    SELECT
+        h.vehicle_count,
+        h.avg_speed,
+        h.geom,
+        COALESCE(
+            ST_ClusterDBSCAN(h.geom, eps := {eps}, minpoints := {minpts}) OVER (),
+            -1
+        ) AS cluster_id
+    FROM hour_slice h
+    JOIN dist d
+      ON h.geom && d.geom
+     AND ST_Intersects(h.geom, d.geom)
+) sub
+WHERE cluster_id >= 0
+GROUP BY cluster_id
+ORDER BY sum_vehicle_count DESC;
+""".format(
+    eps=_TEMPORAL_EPS_METERS,
+    minpts=_TEMPORAL_MINPOINTS,
+    max_speed=_TEMPORAL_MAX_AVG_SPEED,
+)
+
 # Volume gates derived from 2025-01-17 hourly validation (cluster sum_vehicle_count).
 # Hour 18 peak cluster ~15k vehicles; hour 23 peak ~1.9k; smallest meaningful
 # HIGH candidate had 191 vehicles at 14.5 km/h.
@@ -534,12 +607,83 @@ def assign_hourly_severity(avg_speed_kmh: float) -> str:
     return "LOW"
 
 
+async def _ensure_district_available(conn, district_key: str) -> None:
+    """Validate that district boundaries are loaded and the key exists.
+
+    Raises
+    ------
+    DistrictBoundariesNotImported
+        If the boundary table is missing or empty.
+    UnknownDistrict
+        If the boundary table exists but has no row for *district_key*.
+    """
+    table_exists = await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = 'istanbul_district_boundaries'
+        )
+        """
+    )
+    if not table_exists:
+        raise DistrictBoundariesNotImported(DISTRICT_NOT_IMPORTED_MSG)
+
+    total = await conn.fetchval("SELECT COUNT(*) FROM istanbul_district_boundaries")
+    if not total:
+        raise DistrictBoundariesNotImported(DISTRICT_NOT_IMPORTED_MSG)
+
+    exists = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM istanbul_district_boundaries WHERE district_key = $1)",
+        district_key,
+    )
+    if not exists:
+        raise UnknownDistrict(f"Unknown district: {district_key}")
+
+
+async def get_district_boundary(district_key: str) -> dict:
+    """Return the imported district polygon as a WGS84 GeoJSON Feature.
+
+    The geometry is transformed from EPSG:32636 back to WGS84 (EPSG:4326) for
+    Leaflet display. Raises DistrictBoundariesNotImported (table missing/empty)
+    or UnknownDistrict (no such key); the router maps those to 503/404.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await _ensure_district_available(conn, district_key)
+        row = await conn.fetchrow(
+            """
+            SELECT district_name,
+                   ST_AsGeoJSON(ST_Transform(geom, 4326)) AS geojson
+            FROM istanbul_district_boundaries
+            WHERE district_key = $1
+            """,
+            district_key,
+        )
+
+    # _ensure_district_available guarantees a matching row exists here.
+    return {
+        "type": "Feature",
+        "geometry": json.loads(row["geojson"]),
+        "properties": {
+            "district_key": district_key,
+            "district_name": row["district_name"],
+        },
+    }
+
+
 async def get_temporal_clusters(
     date_str: str,
     hour: int,
     bbox: tuple[float, float, float, float] | None = None,
+    district: str | None = None,
 ) -> TemporalClusterResponse:
     """Run spatial DBSCAN on a single-hour slice and return clustered GeoJSON.
+
+    When *district* is given, traffic measurements are filtered by the real
+    district polygon (from istanbul_district_boundaries) BEFORE clustering, so
+    DBSCAN is recalculated on the district subset. *bbox* and *district* are
+    mutually exclusive and the caller is expected to enforce that.
 
     Parameters
     ----------
@@ -549,6 +693,8 @@ async def get_temporal_clusters(
         Hour of day (0-23).
     bbox : tuple[float, float, float, float], optional
         WGS84 bbox as min_lon, min_lat, max_lon, max_lat.
+    district : str, optional
+        Normalized district key (e.g. "besiktas") to filter by real polygon.
 
     Returns
     -------
@@ -572,7 +718,12 @@ async def get_temporal_clusters(
     pool = await get_pool()
     t0 = time.monotonic()
     async with pool.acquire() as conn:
-        if bbox is None:
+        if district is not None:
+            await _ensure_district_available(conn, district)
+            rows = await conn.fetch(
+                _TEMPORAL_CLUSTER_SQL_WITH_DISTRICT, start_ts, end_ts, district
+            )
+        elif bbox is None:
             rows = await conn.fetch(_TEMPORAL_CLUSTER_SQL, start_ts, end_ts)
         else:
             rows = await conn.fetch(
@@ -587,8 +738,8 @@ async def get_temporal_clusters(
     elapsed_ms = (time.monotonic() - t0) * 1000
 
     logger.info(
-        "Temporal clustering: date=%s hour=%02d clusters=%d elapsed=%.1fms",
-        date_str, hour, len(rows), elapsed_ms,
+        "Temporal clustering: date=%s hour=%02d district=%s clusters=%d elapsed=%.1fms",
+        date_str, hour, district or "-", len(rows), elapsed_ms,
     )
 
     if not rows:
