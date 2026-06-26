@@ -188,6 +188,7 @@ uvicorn backend.app.main:app --reload --port 8000
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH&min_lon=...&min_lat=...&max_lon=...&max_lat=...` | Ana tarih/saat sorgusunu WGS84 dikdörtgen bbox alanıyla sınırlar. |
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH&district=besiktas` | Ana tarih/saat sorgusunu içe aktarılan gerçek ilçe poligonuyla sınırlar. |
 | `GET /api/districts/{district_key}/boundary` | Seçili ilçenin sınır poligonunu WGS84 (EPSG:4326) GeoJSON olarak döndürür; harita üzerinde çizgi olarak gösterilir. |
+| `GET /api/districts/besiktas/boundary` | Beşiktaş için örnek ilçe sınır endpoint'i; haritadaki ilçe poligonu bindirmesini besler. |
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Ana sorguyu `LOW`, `MEDIUM` veya `HIGH` yoğunluk düzeyiyle filtreler. |
 | `GET /api/heatmap` | Isı haritası noktalarını döndürür. |
 | `GET /api/heatmap?date=YYYY-MM-DD` | Isı haritası noktalarını tarihe göre filtreler. |
@@ -197,12 +198,12 @@ uvicorn backend.app.main:app --reload --port 8000
 
 ## Bölge Analizi (Bölgesel Filtreleme)
 
-Arayüzdeki **Bölge Analizi** bölümü, tarih/saat sorgusunu belirli bir alanla sınırlamak için dört kapsam sunar. Bunlardan üçü (Harita Görünümü, Dikdörtgen Seç ve dolaylı olarak başlangıç görünümü) opsiyonel WGS84 dikdörtgen (bbox) parametrelerini (`min_lon`, `min_lat`, `max_lon`, `max_lat`) kullanır; **İlçe** modu ise bbox yerine içe aktarılan gerçek ilçe poligonuna karşılık gelen `district` parametresini gönderir. `district` ve bbox parametreleri birlikte kullanılamaz (aynı anda gönderilirse HTTP 400 döner).
+Arayüzdeki **Bölge Analizi** bölümü, tarih/saat sorgusunu belirli bir alanla sınırlamak için dört kapsam sunar. Bunlardan üçü (Harita Görünümü, Dikdörtgen Seç ve dolaylı olarak başlangıç görünümü) opsiyonel WGS84 dikdörtgen (bbox) parametrelerini (`min_lon`, `min_lat`, `max_lon`, `max_lat`) kullanır; **İlçe poligonu** modu ise bbox yerine içe aktarılan gerçek ilçe poligonuna karşılık gelen `district` parametresini gönderir. `district` ve bbox parametreleri birlikte kullanılamaz (aynı anda gönderilirse HTTP 400 döner).
 
 - **Tüm İstanbul** (varsayılan): bbox parametresi gönderilmez. Seçili dikdörtgen kaldırılır, ilçe seçimi sıfırlanır ve kapsam metni `Kapsam: Tüm İstanbul` olur. Bu mod mevcut `/api/clusters?date=YYYY-MM-DD&hour=HH` davranışını değiştirmeden korur.
 - **Harita Görünümü**: o anki görünür harita sınırları (`map.getBounds()`) bbox olarak gönderilir. Kaydırma/yakınlaştırma otomatik yeni istek tetiklemez; kullanıcı **Yenile** düğmesine basınca güncel sınırlar yeniden alınır. Kapsam metni: `Kapsam: Harita görünümü`.
 - **Dikdörtgen Seç**: kullanıcı haritada fareyle sürükleyerek bir dikdörtgen çizer (yalnızca Leaflet `L.rectangle` ve `mousedown`/`mousemove`/`mouseup` kullanılır; harici eklenti yoktur). Çizim sırasında istek atılmaz; seçili dikdörtgen haritada kalır ve **Seçili Alanı Analiz Et** düğmesine basıldığında bbox sorgusu çalışır. Kapsam metni: `Kapsam: Seçili dikdörtgen alan` ve seçilen alanın koordinatları panelde gösterilir.
-- **İlçe (poligon)**: `Beşiktaş`, `Kadıköy`, `Şişli`, `Üsküdar`, `Fatih`, `Bakırköy`, `Ataşehir`, `Maltepe`, `Pendik`, `Sarıyer` ilçeleri açılır listede yer alır. İlçe seçildiğinde arayüz `district=<ilçe_anahtarı>` sorgusu gönderir (örn. `district=fatih`); backend bu ilçenin **gerçek poligonunu** kullanarak ölçümleri filtreler. bbox kullanılmaz. Ayrıca arayüz `/api/districts/<ilçe_anahtarı>/boundary` ucundan ilçe sınır poligonunu alıp haritada **sınır çizgisi** olarak çizer. Kapsam metni örn. `Kapsam: Fatih ilçesi`, sorgu türü `Tarih/saat + ilçe poligonu`. İlçe sınırları veritabanına aktarılmamışsa arayüz net bir Türkçe uyarı gösterir ve sessizce bbox'a düşmez.
+- **İlçe poligonu**: `Beşiktaş`, `Kadıköy`, `Şişli`, `Üsküdar`, `Fatih`, `Bakırköy`, `Ataşehir`, `Maltepe`, `Pendik`, `Sarıyer` ilçeleri açılır listede yer alır. İlçe seçildiğinde arayüz `district=<ilçe_anahtarı>` sorgusu gönderir (örn. `district=fatih`); backend bu ilçenin **gerçek poligonunu** kullanarak ölçümleri filtreler. bbox kullanılmaz. Ayrıca arayüz `/api/districts/<ilçe_anahtarı>/boundary` ucundan ilçe sınır poligonunu alıp haritada **sınır çizgisi** olarak çizer. Kapsam metni örn. `Kapsam: Fatih ilçesi`, sorgu türü `Tarih/saat + ilçe poligonu`. İlçe sınırları veritabanına aktarılmamışsa arayüz net bir Türkçe uyarı gösterir ve sessizce bbox'a düşmez.
 
 > **Not:** İlçe modu gerçek ilçe poligonlarını kullanır; bu poligonlar yerel olarak sağlanan `data/boundaries/istanbul_districts.geojson` dosyasından `istanbul_district_boundaries` tablosuna içe aktarılmalıdır (aşağıya bakın). İlçe seçildiğinde sınır poligonu haritada çizgiyle gösterilir ve harita o poligona sığdırılır. GeoJSON dosyası depoya eklenmez; yerelde sağlanır ve izlenmez.
 
@@ -223,6 +224,7 @@ Bölge filtresi aktif olduğunda sistem, seçilen alan içindeki ölçümleri al
 ```text
 /api/clusters?date=2025-01-17&hour=18&district=besiktas
 /api/clusters?date=2025-01-17&hour=18&district=besiktas&severity=HIGH
+/api/districts/besiktas/boundary
 ```
 
 İlçe modunda sistem önce ilgili ilçenin poligonunu (`istanbul_district_boundaries`) alır, bir saatlik pencere ve `avg_speed < 25` koşulundan sonra ölçümleri `t.geom && d.geom AND ST_Intersects(t.geom, d.geom)` ile bu poligona göre filtreler ve **ardından** PostGIS `ST_ClusterDBSCAN` çalıştırır. Yani kümeleme ilçe alt kümesi üzerinde yeniden hesaplanır; küresel kümeler sonradan kırpılmaz. Yoğunluk düzeyi filtresi ilçe ile birlikte kullanılabilir.
