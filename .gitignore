@@ -24,6 +24,10 @@ data/raw/ibb_hourly_traffic_density/*.gz
 !data/raw/ibb_hourly_traffic_density/.gitkeep
 data/road_network/*
 !data/road_network/.gitkeep
+# District boundary GeoJSON is supplied locally; do not track it unless its
+# source/license is explicitly approved. Keep only the placeholder.
+data/boundaries/*
+!data/boundaries/.gitkeep
 *.csv.gz
 *.dump
 *.backup

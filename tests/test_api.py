@@ -17,6 +17,347 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+@pytest.fixture
+def temporal_cluster_client(monkeypatch):
+    """FastAPI test client with temporal cluster retrieval stubbed."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.models.cluster import TemporalClusterResponse
+    from backend.app.routers import clusters as clusters_router
+
+    calls = []
+
+    async def fake_get_temporal_clusters(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return TemporalClusterResponse(
+            date=args[0],
+            hour=args[1],
+            cluster_count=0,
+            features=[],
+        )
+
+    monkeypatch.setattr(
+        clusters_router,
+        "get_temporal_clusters",
+        fake_get_temporal_clusters,
+    )
+
+    app = FastAPI()
+    app.include_router(clusters_router.router, prefix="/api")
+
+    with TestClient(app) as client:
+        yield client, calls
+
+
+def test_temporal_clusters_without_bbox_still_uses_existing_call(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "FeatureCollection"
+    assert data["date"] == "2025-01-17"
+    assert data["hour"] == 18
+    assert calls == [{"args": ("2025-01-17", 18), "kwargs": {}}]
+
+
+def test_temporal_clusters_accepts_full_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {"bbox": (28.95, 41.02, 29.08, 41.10)},
+        }
+    ]
+
+
+def test_temporal_clusters_rejects_partial_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&min_lon=28.95")
+
+    assert r.status_code == 400
+    assert "All bbox parameters" in r.json()["detail"]
+    assert calls == []
+
+
+def test_temporal_clusters_rejects_inverted_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&min_lon=29.08&min_lat=41.02&max_lon=28.95&max_lat=41.10"
+    )
+
+    assert r.status_code == 400
+    assert "min_lon" in r.json()["detail"]
+    assert calls == []
+
+
+def test_temporal_clusters_invalid_bbox_range_returns_422(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&min_lon=-181&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 422
+    assert calls == []
+
+
+# ── District polygon filtering ───────────────────────────────────────────────
+
+def test_temporal_clusters_accepts_district(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&district=besiktas")
+
+    assert r.status_code == 200
+    assert calls == [
+        {"args": ("2025-01-17", 18), "kwargs": {"district": "besiktas"}}
+    ]
+
+
+def test_temporal_clusters_district_is_normalized_lowercase(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&district=BESIKTAS")
+
+    assert r.status_code == 200
+    assert calls == [
+        {"args": ("2025-01-17", 18), "kwargs": {"district": "besiktas"}}
+    ]
+
+
+def test_temporal_clusters_accepts_turkish_cased_district(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    # Raw Turkish-cased name must normalize to the stored key before the service call.
+    r = client.get(
+        "/api/clusters",
+        params={"date": "2025-01-17", "hour": "18", "district": "Beşiktaş"},
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {"args": ("2025-01-17", 18), "kwargs": {"district": "besiktas"}}
+    ]
+
+
+def test_temporal_clusters_accepts_severity_with_district(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18&district=besiktas&severity=HIGH"
+    )
+
+    assert r.status_code == 200
+    # severity is applied in the router after retrieval; only district reaches the service
+    assert calls == [
+        {"args": ("2025-01-17", 18), "kwargs": {"district": "besiktas"}}
+    ]
+
+
+def test_temporal_clusters_district_and_bbox_are_mutually_exclusive(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18&district=besiktas"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 400
+    assert "mutually exclusive" in r.json()["detail"]
+    assert calls == []
+
+
+def test_temporal_clusters_district_without_date_hour_returns_400(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?district=besiktas")
+
+    assert r.status_code == 400
+    assert calls == []
+
+
+def test_temporal_clusters_invalid_district_returns_400(temporal_cluster_client, monkeypatch):
+    client, calls = temporal_cluster_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.cluster_service import UnknownDistrict
+
+    async def raise_unknown(*args, **kwargs):
+        raise UnknownDistrict("Unknown district: atlantis")
+
+    monkeypatch.setattr(clusters_router, "get_temporal_clusters", raise_unknown)
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&district=atlantis")
+
+    assert r.status_code == 400
+    assert "Unknown district" in r.json()["detail"]
+
+
+def test_temporal_clusters_district_not_imported_returns_503(temporal_cluster_client, monkeypatch):
+    client, calls = temporal_cluster_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.cluster_service import (
+        DISTRICT_NOT_IMPORTED_MSG,
+        DistrictBoundariesNotImported,
+    )
+
+    async def raise_not_imported(*args, **kwargs):
+        raise DistrictBoundariesNotImported(DISTRICT_NOT_IMPORTED_MSG)
+
+    monkeypatch.setattr(clusters_router, "get_temporal_clusters", raise_not_imported)
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&district=besiktas")
+
+    assert r.status_code == 503
+    assert "not imported" in r.json()["detail"].lower()
+
+
+# ── District boundary endpoint ───────────────────────────────────────────────
+
+@pytest.fixture
+def boundary_client(monkeypatch):
+    """FastAPI test client with district-boundary retrieval stubbed."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.routers import clusters as clusters_router
+
+    calls = []
+
+    async def fake_get_district_boundary(key):
+        calls.append(key)
+        return {
+            "type": "Feature",
+            "geometry": {"type": "MultiPolygon", "coordinates": []},
+            "properties": {"district_key": key, "district_name": key},
+        }
+
+    monkeypatch.setattr(
+        clusters_router, "get_district_boundary", fake_get_district_boundary
+    )
+
+    app = FastAPI()
+    app.include_router(clusters_router.router, prefix="/api")
+    with TestClient(app) as client:
+        yield client, calls
+
+
+def test_boundary_accepts_and_normalizes_turkish_key(boundary_client):
+    client, calls = boundary_client
+
+    r = client.get("/api/districts/Beşiktaş/boundary")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "Feature"
+    assert data["properties"]["district_key"] == "besiktas"
+    assert calls == ["besiktas"]
+
+
+def test_boundary_returns_503_when_table_missing(boundary_client, monkeypatch):
+    client, _ = boundary_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.cluster_service import (
+        DISTRICT_NOT_IMPORTED_MSG,
+        DistrictBoundariesNotImported,
+    )
+
+    async def raise_not_imported(key):
+        raise DistrictBoundariesNotImported(DISTRICT_NOT_IMPORTED_MSG)
+
+    monkeypatch.setattr(clusters_router, "get_district_boundary", raise_not_imported)
+
+    r = client.get("/api/districts/besiktas/boundary")
+
+    assert r.status_code == 503
+    assert "not imported" in r.json()["detail"].lower()
+
+
+def test_boundary_returns_404_for_unknown_district(boundary_client, monkeypatch):
+    client, _ = boundary_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.cluster_service import UnknownDistrict
+
+    async def raise_unknown(key):
+        raise UnknownDistrict("Unknown district: " + key)
+
+    monkeypatch.setattr(clusters_router, "get_district_boundary", raise_unknown)
+
+    r = client.get("/api/districts/notreal/boundary")
+
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Unknown district"
+
+
+# ── District key normalization (shared helper, no DB needed) ─────────────────
+
+def test_normalize_district_key_shared_helper():
+    from backend.app.services.district_utils import normalize_district_key
+
+    cases = {
+        "Beşiktaş": "besiktas",
+        "Şişli": "sisli",
+        "Üsküdar": "uskudar",
+        "Kadıköy": "kadikoy",
+        "Bakırköy": "bakirkoy",
+        "Ataşehir": "atasehir",
+        "Sarıyer": "sariyer",
+        "Çekmeköy": "cekmekoy",
+        "Büyükçekmece": "buyukcekmece",
+        "Küçükçekmece": "kucukcekmece",
+    }
+    for name, expected in cases.items():
+        assert normalize_district_key(name) == expected
+    # Whitespace and casing are normalized away; None is safe.
+    assert normalize_district_key("  FATİH  ") == "fatih"
+    assert normalize_district_key(None) == ""
+
+
+def test_normalize_district_key_turkish_chars():
+    # The import script re-exports the shared helper, so this entry point still works.
+    from scripts.import_district_boundaries import normalize_district_key
+
+    assert normalize_district_key("Beşiktaş") == "besiktas"
+    assert normalize_district_key("Şişli") == "sisli"
+    assert normalize_district_key("Üsküdar") == "uskudar"
+    assert normalize_district_key("Kadıköy") == "kadikoy"
+    assert normalize_district_key("Fatih") == "fatih"
+    # Whitespace and casing are normalized away
+    assert normalize_district_key("  FATİH  ") == "fatih"
+
+
+def test_import_district_boundaries_missing_file(tmp_path):
+    """import_district_boundaries.py must fail cleanly when the file is missing."""
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "scripts/import_district_boundaries.py",
+         "--input", str(tmp_path / "nonexistent.geojson")],
+        capture_output=True, text=True,
+        cwd=str(PROJECT_ROOT),
+    )
+    assert result.returncode != 0
+    output = (result.stdout + result.stderr).lower()
+    assert "not found" in output
+
+
 # ── AIS in cluster_service ───────────────────────────────────────────────────
 
 def test_service_ais_empty():

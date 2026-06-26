@@ -22,12 +22,16 @@ from backend.app.models.cluster import (
     TemporalClusterResponse,
 )
 from backend.app.services.cluster_service import (
+    DistrictBoundariesNotImported,
+    UnknownDistrict,
     build_geojson,
     compute_ais_and_severity,
     get_cached_cluster_summaries,
+    get_district_boundary,
     get_global_stats,
     get_temporal_clusters,
 )
+from backend.app.services.district_utils import normalize_district_key
 
 router = APIRouter()
 
@@ -55,6 +59,38 @@ async def list_clusters(
         description="Filter by severity level: LOW, MEDIUM, or HIGH",
         pattern="^(LOW|MEDIUM|HIGH)$",
     ),
+    min_lon: Optional[float] = Query(
+        None,
+        description="Minimum longitude for optional WGS84 bbox filter.",
+        ge=-180,
+        le=180,
+    ),
+    min_lat: Optional[float] = Query(
+        None,
+        description="Minimum latitude for optional WGS84 bbox filter.",
+        ge=-90,
+        le=90,
+    ),
+    max_lon: Optional[float] = Query(
+        None,
+        description="Maximum longitude for optional WGS84 bbox filter.",
+        ge=-180,
+        le=180,
+    ),
+    max_lat: Optional[float] = Query(
+        None,
+        description="Maximum latitude for optional WGS84 bbox filter.",
+        ge=-90,
+        le=90,
+    ),
+    district: Optional[str] = Query(
+        None,
+        description=(
+            "Optional district key (e.g. 'besiktas') to filter by the real "
+            "district polygon. Requires 'date' and 'hour'; mutually exclusive "
+            "with the bbox parameters."
+        ),
+    ),
 ):
     """
     Get traffic anomaly clusters as GeoJSON.
@@ -65,14 +101,69 @@ async def list_clusters(
     minpoints=2, avg_speed<25). Severity uses congestion_score combining
     speed drop, hourly vehicle volume, and cluster coverage.
 
+    **Region filters** (temporal mode only): an optional WGS84 bbox
+    (min_lon/min_lat/max_lon/max_lat) or a `district` key may be supplied to
+    restrict the analysis to a sub-area. bbox and district are mutually
+    exclusive; in both cases filtering happens BEFORE DBSCAN, so clusters are
+    recalculated on the selected subset.
+
     **Legacy mode** (no date/hour):
     Returns cached historical aggregate clusters with AIS scoring.
     Kept for backward compatibility.
     """
+    bbox_values = (min_lon, min_lat, max_lon, max_lat)
+    bbox_flags = [value is not None for value in bbox_values]
+    if any(bbox_flags) and not all(bbox_flags):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "All bbox parameters must be provided together: "
+                "min_lon, min_lat, max_lon, max_lat."
+            ),
+        )
+
+    bbox = None
+    if all(bbox_flags):
+        if min_lon >= max_lon:
+            raise HTTPException(
+                status_code=400,
+                detail="'min_lon' must be less than 'max_lon'.",
+            )
+        if min_lat >= max_lat:
+            raise HTTPException(
+                status_code=400,
+                detail="'min_lat' must be less than 'max_lat'.",
+            )
+        bbox = (min_lon, min_lat, max_lon, max_lat)
+
+    # ── District param (real polygon mode) ────────────────────────────
+    district_key = None
+    if district is not None:
+        # Normalize identically to the import script so Turkish-cased names
+        # (e.g. "Beşiktaş") map to the stored key ("besiktas").
+        district_key = normalize_district_key(district)
+        if not district_key:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' must be a non-empty value.",
+            )
+        if bbox is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' and bbox parameters are mutually exclusive.",
+            )
+
     # ── Temporal mode ─────────────────────────────────────────────────
     if date is not None and hour is not None:
         try:
-            result = await get_temporal_clusters(date, hour)
+            if district_key is not None:
+                result = await get_temporal_clusters(date, hour, district=district_key)
+            elif bbox is None:
+                result = await get_temporal_clusters(date, hour)
+            else:
+                result = await get_temporal_clusters(date, hour, bbox=bbox)
+        except DistrictBoundariesNotImported as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -119,6 +210,18 @@ async def list_clusters(
             detail="Both 'date' and 'hour' must be provided for temporal mode.",
         )
 
+    if bbox is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Bbox filtering requires both 'date' and 'hour' parameters.",
+        )
+
+    if district_key is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="District filtering requires both 'date' and 'hour' parameters.",
+        )
+
     # ── Legacy mode (backward compatible) ─────────────────────────────
     clusters = await get_cached_cluster_summaries()
     if not clusters:
@@ -154,6 +257,27 @@ async def get_cluster(request: Request, cluster_id: int):
         )
 
     return build_geojson(matched)
+
+
+@router.get("/districts/{district_key}/boundary")
+@limiter.limit("60/minute")
+async def district_boundary(request: Request, district_key: str):
+    """
+    Return the imported district polygon boundary as a WGS84 GeoJSON Feature.
+
+    Used by the frontend to draw the real district outline on the map. The
+    geometry comes from istanbul_district_boundaries (transformed to EPSG:4326);
+    the local GeoJSON source file is never read or exposed here.
+    """
+    key = normalize_district_key(district_key)
+    if not key:
+        raise HTTPException(status_code=400, detail="Unknown district")
+    try:
+        return await get_district_boundary(key)
+    except DistrictBoundariesNotImported as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except UnknownDistrict as exc:
+        raise HTTPException(status_code=404, detail="Unknown district") from exc
 
 
 @router.get("/stats", response_model=StatsResponse)

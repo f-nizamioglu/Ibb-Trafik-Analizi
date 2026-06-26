@@ -89,6 +89,78 @@
             background: #f0f0f0;
         }
 
+        /* ── Region Analysis Controls ───────────────────────────────── */
+        .region-controls {
+            background: #fafafa;
+        }
+        .region-controls > .control-group > label {
+            font-weight: 600;
+            color: #333;
+        }
+        .btn-mode {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px 12px;
+            font-size: 13px;
+            background: #fff;
+            color: #333;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-mode:hover {
+            background: #f0f0f0;
+        }
+        .btn-mode.is-active {
+            background: #1565c0;
+            border-color: #1565c0;
+            color: #fff;
+        }
+        .btn-analyze {
+            border: 1px solid #1565c0;
+            background: #e8f0fb;
+            color: #0d47a1;
+        }
+        .btn-analyze:hover {
+            background: #d8e6f8;
+        }
+
+        /* ── Region Summary Panel ───────────────────────────────────── */
+        .region-panel {
+            background: #eef3fb;
+            border-bottom: 1px solid #d6e0ef;
+            padding: 8px 24px;
+            font-size: 12.5px;
+            color: #333;
+        }
+        .region-panel-main {
+            display: flex;
+            gap: 22px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .region-panel-label {
+            font-weight: 600;
+            color: #555;
+        }
+        .region-panel-bbox {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            font-size: 11.5px;
+            color: #2a4d75;
+        }
+        .region-panel-note {
+            margin-top: 3px;
+            font-size: 11.5px;
+            color: #777;
+        }
+        .region-panel-recalc {
+            display: block;
+            margin-top: 2px;
+            color: #8a6d3b;
+        }
+        .region-panel-warn {
+            color: #b00020;
+        }
+
         /* ── Summary Cards ──────────────────────────────────────────── */
         .summary {
             padding: 12px 24px;
@@ -122,12 +194,18 @@
             padding: 0 24px 12px 24px;
         }
         #map {
-            height: calc(100vh - 300px);
+            height: calc(100vh - 360px);
             min-height: 400px;
             width: 100%;
             border: 1px solid #ddd;
             border-radius: 6px;
             background: #eee;
+        }
+        /* Crosshair cursor while drawing a selection rectangle */
+        .map-drawing,
+        .map-drawing .leaflet-grab,
+        .map-drawing .leaflet-interactive {
+            cursor: crosshair !important;
         }
 
         /* ── Legend ──────────────────────────────────────────────────── */
@@ -204,7 +282,7 @@
     <!-- Header -->
     <div class="header">
         <h1 id="page-title">İstanbul Trafik Yoğunluğu Analizi</h1>
-        <p>Tarih ve saate göre trafik kümelenmesi</p>
+        <p>Tarih, saat ve bölge seçimine göre trafik kümelenmesi</p>
     </div>
 
     <!-- Controls -->
@@ -228,6 +306,43 @@
             </select>
         </div>
         <button class="btn-refresh" id="btnRefresh">Yenile</button>
+    </div>
+
+    <!-- Region Analysis Controls -->
+    <div class="controls region-controls">
+        <div class="control-group">
+            <label>Bölge Analizi:</label>
+            <button class="btn-mode is-active" id="btnModeAll" data-mode="all">Tüm İstanbul</button>
+            <button class="btn-mode" id="btnModeMapView" data-mode="mapview">Harita Görünümü</button>
+            <button class="btn-mode" id="btnModeRect" data-mode="rectangle">Dikdörtgen Seç</button>
+            <button class="btn-refresh btn-analyze" id="btnAnalyzeRect" style="display:none;">Seçili Alanı Analiz Et</button>
+        </div>
+        <div class="control-group">
+            <label for="districtSelect">İlçe:</label>
+            <select id="districtSelect">
+                <option value="">Tüm İstanbul</option>
+                <option value="besiktas">Beşiktaş</option>
+                <option value="kadikoy">Kadıköy</option>
+                <option value="sisli">Şişli</option>
+                <option value="uskudar">Üsküdar</option>
+                <option value="fatih">Fatih</option>
+                <option value="bakirkoy">Bakırköy</option>
+                <option value="atasehir">Ataşehir</option>
+                <option value="maltepe">Maltepe</option>
+                <option value="pendik">Pendik</option>
+                <option value="sariyer">Sarıyer</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Region Summary Panel -->
+    <div class="region-panel" id="regionPanel">
+        <div class="region-panel-main">
+            <span><span class="region-panel-label">Kapsam:</span> <span id="regionScopeText">Tüm İstanbul</span></span>
+            <span><span class="region-panel-label">Sorgu türü:</span> <span id="regionQueryType">Tarih/saat + tüm alan</span></span>
+            <span id="regionBboxItem" style="display:none;"><span class="region-panel-label">Alan:</span> <span class="region-panel-bbox" id="regionBboxText">-</span></span>
+        </div>
+        <div class="region-panel-note" id="regionPanelNote">Gösterilen metrikler tüm İstanbul kapsamı için hesaplanmıştır.</div>
     </div>
 
     <!-- Summary Cards -->
@@ -257,7 +372,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Veri aralığı: 2020-01-01 / 2025-01-31<br><span style="opacity: 0.8; font-size: 11px; margin-top: 5px; display: inline-block;">Renkler; hız düşüşü, saatlik araç hacmi ve küme büyüklüğü birlikte değerlendirilerek hesaplanan trafik yoğunluk skorunu gösterir. İşaretçiler küme merkezidir; yol üzerindeki birebir sensör konumunu temsil etmez.</span>
+        Veri aralığı: 2020-01-01 / 2025-01-31<br><span style="opacity: 0.8; font-size: 11px; margin-top: 5px; display: inline-block;">Renkler; hız düşüşü, saatlik araç hacmi ve küme büyüklüğü birlikte değerlendirilerek hesaplanan trafik yoğunluk skorunu gösterir. İşaretçiler DBSCAN küme merkezidir; gerçek araç, sensör veya yol noktası değildir. İlçe seçiminde gerçek ilçe poligonu veritabanından okunur ve haritada sınır çizgisi olarak gösterilir; Harita Görünümü ve Dikdörtgen Seç modları dikdörtgen bbox alan kullanır.</span>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -276,9 +391,33 @@
             LOW:    '#fbc02d'
         };
         var SEVERITY_LABELS = {
-            HIGH:   'Y\u00fcksek Yo\u011funluk',
-            MEDIUM: 'Orta Yo\u011funluk',
-            LOW:    'D\u00fc\u015f\u00fck Yo\u011funluk'
+            HIGH:   'Yüksek Yoğunluk',
+            MEDIUM: 'Orta Yoğunluk',
+            LOW:    'Düşük Yoğunluk'
+        };
+
+        // District mode sends the district key to the backend, which filters
+        // traffic by the real district polygon (istanbul_district_boundaries)
+        // before DBSCAN. The <option value="..."> keys are the district keys;
+        // no client-side bbox approximation is used for districts anymore.
+
+        var RECT_STYLE = {
+            color: '#1565c0',
+            weight: 2,
+            fillColor: '#1565c0',
+            fillOpacity: 0.08,
+            dashArray: '5 4',
+            interactive: false
+        };
+
+        // District boundary outline: clearly visible line, very light fill so it
+        // never hides cluster markers. Non-interactive (does not steal clicks).
+        var DISTRICT_STYLE = {
+            color: '#6a1b9a',
+            weight: 2.5,
+            fillColor: '#6a1b9a',
+            fillOpacity: 0.05,
+            interactive: false
         };
 
         function markerStyle(props) {
@@ -309,6 +448,16 @@
         var hourLabel      = document.getElementById('hourLabel');
         var severityFilter = document.getElementById('severityFilter');
         var btnRefresh     = document.getElementById('btnRefresh');
+        var btnModeAll     = document.getElementById('btnModeAll');
+        var btnModeMapView = document.getElementById('btnModeMapView');
+        var btnModeRect    = document.getElementById('btnModeRect');
+        var btnAnalyzeRect = document.getElementById('btnAnalyzeRect');
+        var districtSelect = document.getElementById('districtSelect');
+        var regionScopeText = document.getElementById('regionScopeText');
+        var regionQueryType = document.getElementById('regionQueryType');
+        var regionBboxItem  = document.getElementById('regionBboxItem');
+        var regionBboxText  = document.getElementById('regionBboxText');
+        var regionPanelNote = document.getElementById('regionPanelNote');
         var cardClusterCount  = document.getElementById('cardClusterCount');
         var cardAvgSpeed      = document.getElementById('cardAvgSpeed');
         var cardTotalVehicles = document.getElementById('cardTotalVehicles');
@@ -323,15 +472,31 @@
 
         var clusterLayer = null;
 
+        // ── Region state ─────────────────────────────────────────────
+        // regionMode: 'all' | 'mapview' | 'rectangle' | 'district'
+        var regionMode = 'all';
+        // activeBbox: null or { minLon, minLat, maxLon, maxLat } — single source
+        // of truth for the bbox params sent to the API.
+        var activeBbox = null;
+        // activeDistrict: null or a district key (e.g. 'fatih'). Mutually
+        // exclusive with activeBbox — only one region param is sent at a time.
+        var activeDistrict = null;
+        var rectangleLayer = null;   // persistent selection rectangle overlay
+        var districtLayer = null;    // district boundary polygon overlay
+        var districtBoundaryToken = 0; // guards against stale boundary fetches
+        var drawingMode = false;     // user is currently dragging a rectangle
+        var drawStartLatLng = null;
+        var drawTempRect = null;     // in-progress rectangle while dragging
+
         // ── Legend Control ────────────────────────────────────────────
         var legend = L.control({ position: 'bottomright' });
         legend.onAdd = function () {
             var div = L.DomUtil.create('div', 'legend-box');
             div.innerHTML =
                 '<strong>Lejant</strong>' +
-                '<div class="legend-item"><span class="legend-color" style="background:#d32f2f"></span> Y\u00fcksek Yo\u011funluk</div>' +
-                '<div class="legend-item"><span class="legend-color" style="background:#f57c00"></span> Orta Yo\u011funluk</div>' +
-                '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> D\u00fc\u015f\u00fck Yo\u011funluk</div>';
+                '<div class="legend-item"><span class="legend-color" style="background:#d32f2f"></span> Yüksek Yoğunluk</div>' +
+                '<div class="legend-item"><span class="legend-color" style="background:#f57c00"></span> Orta Yoğunluk</div>' +
+                '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> Düşük Yoğunluk</div>';
             return div;
         };
         legend.addTo(map);
@@ -368,11 +533,146 @@
                 .replace(/"/g, '&quot;');
         }
 
+        function boundsToBbox(bounds) {
+            var sw = bounds.getSouthWest();
+            var ne = bounds.getNorthEast();
+            return {
+                minLon: sw.lng,
+                minLat: sw.lat,
+                maxLon: ne.lng,
+                maxLat: ne.lat
+            };
+        }
+
+        function bboxToBounds(bbox) {
+            return L.latLngBounds(
+                L.latLng(bbox.minLat, bbox.minLon),
+                L.latLng(bbox.maxLat, bbox.maxLon)
+            );
+        }
+
         function clearMapLayer() {
             if (clusterLayer) {
                 map.removeLayer(clusterLayer);
                 clusterLayer = null;
             }
+        }
+
+        function clearRectangleOverlay() {
+            if (rectangleLayer) {
+                map.removeLayer(rectangleLayer);
+                rectangleLayer = null;
+            }
+            if (drawTempRect) {
+                map.removeLayer(drawTempRect);
+                drawTempRect = null;
+            }
+        }
+
+        function clearDistrictOverlay() {
+            // Invalidate any in-flight boundary fetch so it cannot draw later.
+            districtBoundaryToken++;
+            if (districtLayer) {
+                map.removeLayer(districtLayer);
+                districtLayer = null;
+            }
+        }
+
+        // Fetch and draw the real district boundary polygon (EPSG:4326 GeoJSON).
+        // Independent of the cluster fetch; a failure must not break clusters.
+        function loadDistrictBoundary(key) {
+            var token = ++districtBoundaryToken;
+            fetch(API_BASE + '/api/districts/' + encodeURIComponent(key) + '/boundary')
+                .then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(function (geojson) {
+                    // Ignore if the user changed scope while this was in flight.
+                    if (token !== districtBoundaryToken || regionMode !== 'district') return;
+                    if (districtLayer) {
+                        map.removeLayer(districtLayer);
+                        districtLayer = null;
+                    }
+                    districtLayer = L.geoJSON(geojson, { style: DISTRICT_STYLE }).addTo(map);
+                    var b = districtLayer.getBounds();
+                    if (b.isValid()) {
+                        map.fitBounds(b, { padding: [30, 30], maxZoom: 14, animate: false });
+                    }
+                })
+                .catch(function (err) {
+                    if (token !== districtBoundaryToken || regionMode !== 'district') return;
+                    console.error('Boundary error:', err);
+                    appendRegionWarning('İlçe sınırı haritada gösterilemedi.');
+                });
+        }
+
+        // ── Region scope / summary panel ─────────────────────────────
+
+        function setActiveModeButton(mode) {
+            [btnModeAll, btnModeMapView, btnModeRect].forEach(function (btn) {
+                if (btn.getAttribute('data-mode') === mode) {
+                    btn.classList.add('is-active');
+                } else {
+                    btn.classList.remove('is-active');
+                }
+            });
+        }
+
+        function setRegionScope(scopeLabel, bbox, district) {
+            regionScopeText.textContent = scopeLabel;
+            if (district) {
+                regionQueryType.textContent = 'Tarih/saat + ilçe poligonu';
+            } else if (bbox) {
+                regionQueryType.textContent = 'Tarih/saat + bbox';
+            } else {
+                regionQueryType.textContent = 'Tarih/saat + tüm alan';
+            }
+            if (bbox) {
+                regionBboxText.textContent =
+                    'min_lon=' + bbox.minLon.toFixed(4) +
+                    ', min_lat=' + bbox.minLat.toFixed(4) +
+                    ', max_lon=' + bbox.maxLon.toFixed(4) +
+                    ', max_lat=' + bbox.maxLat.toFixed(4);
+                regionBboxItem.style.display = '';
+            } else {
+                regionBboxText.textContent = '-';
+                regionBboxItem.style.display = 'none';
+            }
+            // Region filtering (bbox or district) recalculates DBSCAN on the subset.
+            if (district) {
+                setRegionNote(
+                    'Gösterilen metrikler seçili kapsam için hesaplanmıştır.',
+                    'İlçe sınırı haritada çizgiyle gösterilir; kümeler bu poligon ' +
+                    'içindeki ölçümlerle yeniden hesaplanır.'
+                );
+            } else if (bbox) {
+                setRegionNote(
+                    'Gösterilen metrikler seçili kapsam için hesaplanmıştır.',
+                    'Not: Bölge seçildiğinde kümeleme seçilen alan içindeki ölçümler ' +
+                    'için yeniden hesaplanır; bu nedenle Tüm İstanbul görünümündeki ' +
+                    'marker konumlarıyla birebir aynı olmayabilir.'
+                );
+            } else {
+                setRegionNote('Gösterilen metrikler tüm İstanbul kapsamı için hesaplanmıştır.', null);
+            }
+        }
+
+        function setRegionNote(mainText, subText) {
+            regionPanelNote.textContent = mainText;
+            if (subText) {
+                var span = document.createElement('span');
+                span.className = 'region-panel-recalc';
+                span.textContent = subText;
+                regionPanelNote.appendChild(span);
+            }
+        }
+
+        function appendRegionWarning(text) {
+            var span = document.createElement('span');
+            span.className = 'region-panel-recalc region-panel-warn';
+            span.textContent = text;
+            regionPanelNote.appendChild(span);
         }
 
         function updateSummaryCards(data) {
@@ -394,7 +694,6 @@
         function showStatusMessage(text, isError) {
             clearMapLayer();
             var container = document.getElementById('map');
-            // Remove previous overlay if any
             var prev = container.querySelector('.status-overlay');
             if (prev) prev.remove();
 
@@ -425,34 +724,35 @@
             var minSpeedRow = '';
             if (props.min_speed_kmh !== undefined && props.min_speed_kmh !== null) {
                 minSpeedRow =
-                    '<div class="popup-row"><span class="popup-label">Min. H\u0131z:</span><span class="popup-value">' +
+                    '<div class="popup-row"><span class="popup-label">Min. Hız:</span><span class="popup-value">' +
                     props.min_speed_kmh.toFixed(1) + ' km/h</span></div>';
             }
 
             return '<div>' +
-                '<div class="popup-row"><span class="popup-label">Trafik Yo\u011funluk Skoru:</span><span class="popup-value">' +
+                '<div class="popup-row"><span class="popup-label">Trafik Yoğunluk Skoru:</span><span class="popup-value">' +
                     (props.congestion_score != null ? props.congestion_score.toFixed(1) : '-') + '/100</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Yoğunluk Düzeyi:</span><span class="popup-value">' + escapeHtml(severity) + '</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Tarih:</span><span class="popup-value">' + escapeHtml(selectedDate) + '</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Saat:</span><span class="popup-value">' + hourStr + ':00 - ' + hourStr + ':59</span></div>' +
-                '<div class="popup-row"><span class="popup-label">K\u00fcme Ortalama H\u0131z\u0131:</span><span class="popup-value">' + props.avg_speed_kmh.toFixed(1) + ' km/h</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Küme Ortalama Hızı:</span><span class="popup-value">' + props.avg_speed_kmh.toFixed(1) + ' km/h</span></div>' +
                 minSpeedRow +
                 '<div class="popup-row"><span class="popup-label">Saatlik Araç Hacmi:</span><span class="popup-value">' + props.sum_vehicle_count.toLocaleString('tr-TR') + '</span></div>' +
-                '<div class="popup-row"><span class="popup-label">H\u00fccre Say\u0131s\u0131:</span><span class="popup-value">' + props.point_count + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Hücre Sayısı:</span><span class="popup-value">' + props.point_count + '</span></div>' +
                 '<div style="margin-top:8px;font-size:12px;color:#666;line-height:1.45;">' +
-                    '\u0130\u015faret\u00e7i, DBSCAN k\u00fcmesinin merkezini g\u00f6sterir; ger\u00e7ek ara\u00e7, sens\u00f6r veya yol noktas\u0131 de\u011fildir.' +
+                    'İşaretçi, DBSCAN kümesinin merkezini gösterir; gerçek araç, sensör veya yol noktası değildir.' +
                 '</div>' +
                 '</div>';
         }
 
         // ── Render clusters on map ───────────────────────────────────
 
-        function renderClusters(data) {
+        function renderClusters(data, options) {
+            options = options || {};
             clearMapLayer();
             clearStatusMessage();
 
             if (!data || !data.features || data.features.length === 0) {
-                showStatusMessage('Se\u00e7ilen tarih ve saat i\u00e7in trafik k\u00fcmesi bulunamad\u0131.', false);
+                showStatusMessage('Seçilen kapsam için trafik kümesi bulunamadı.', false);
                 updateSummaryCards(data);
                 return;
             }
@@ -472,9 +772,13 @@
                 }
             }).addTo(map);
 
-            // Fit bounds if clusters exist, keep a reasonable zoom
+            // Fit to clusters in "Tüm İstanbul" mode, or when a caller asks
+            // explicitly (district mode, which draws no overlay). Map-view and
+            // rectangle modes keep the user-chosen framing.
             var bounds = clusterLayer.getBounds();
-            if (bounds.isValid()) {
+            var shouldFit = options.fitToClusters === true ||
+                (regionMode === 'all' && options.fitToClusters !== false);
+            if (bounds.isValid() && shouldFit) {
                 map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
             }
         }
@@ -483,7 +787,8 @@
 
         var fetchAbortController = null;
 
-        function fetchTemporalClusters() {
+        function fetchTemporalClusters(options) {
+            options = options || {};
             var selectedDate = getSelectedDate();
             var selectedHour = getSelectedHour();
             var severity = getSelectedSeverity();
@@ -496,33 +801,204 @@
             }
             fetchAbortController = new AbortController();
 
-            var url = API_BASE + '/api/clusters?date=' + selectedDate + '&hour=' + selectedHour;
+            var params = new URLSearchParams({
+                date: selectedDate,
+                hour: selectedHour
+            });
             if (severity) {
-                url += '&severity=' + severity;
+                params.set('severity', severity);
             }
+            // District and bbox are mutually exclusive; district takes priority
+            // when set. Only one region param is ever sent.
+            if (activeDistrict) {
+                params.set('district', activeDistrict);
+            } else if (activeBbox) {
+                params.set('min_lon', activeBbox.minLon.toFixed(6));
+                params.set('min_lat', activeBbox.minLat.toFixed(6));
+                params.set('max_lon', activeBbox.maxLon.toFixed(6));
+                params.set('max_lat', activeBbox.maxLat.toFixed(6));
+            }
+            var url = API_BASE + '/api/clusters?' + params.toString();
 
-            showStatusMessage('Y\u00fckleniyor...', false);
+            showStatusMessage('Yükleniyor...', false);
 
             fetch(url, { signal: fetchAbortController.signal })
                 .then(function (response) {
+                    // 503 is returned only when district boundaries are not imported.
+                    if (response.status === 503) {
+                        throw { __districtNotImported: true };
+                    }
                     if (!response.ok) {
                         throw new Error('HTTP ' + response.status);
                     }
                     return response.json();
                 })
                 .then(function (data) {
-                    renderClusters(data);
+                    renderClusters(data, options);
                 })
                 .catch(function (err) {
-                    if (err.name === 'AbortError') return;
+                    if (err && err.name === 'AbortError') return;
+                    if (err && err.__districtNotImported) {
+                        showStatusMessage(
+                            'İlçe sınırları veritabanına aktarılmamış. ' +
+                            'Lütfen python scripts/import_district_boundaries.py komutunu çalıştırın.',
+                            true
+                        );
+                        updateSummaryCards(null);
+                        return;
+                    }
                     console.error('API error:', err);
                     showStatusMessage(
-                        'Sunucu hatas\u0131. L\u00fctfen backend servisinin \u00e7al\u0131\u015ft\u0131\u011f\u0131n\u0131 kontrol edin.',
+                        'Sunucu hatası. Lütfen backend servisinin çalıştığını kontrol edin.',
                         true
                     );
                     updateSummaryCards(null);
                 });
         }
+
+        // Refetch using the active scope; keep framing in region modes.
+        function refetchCurrentScope() {
+            fetchTemporalClusters({ fitToClusters: regionMode === 'all' });
+        }
+
+        // ── Region mode transitions ──────────────────────────────────
+
+        function resetDrawingInteraction() {
+            drawingMode = false;
+            drawStartLatLng = null;
+            if (map.dragging && !map.dragging.enabled()) {
+                map.dragging.enable();
+            }
+            L.DomUtil.removeClass(map.getContainer(), 'map-drawing');
+        }
+
+        // Tüm İstanbul: no bbox, no district, clear rectangle, reset scope.
+        function enterAllMode(resetView, fetchData) {
+            regionMode = 'all';
+            activeBbox = null;
+            activeDistrict = null;
+            resetDrawingInteraction();
+            clearRectangleOverlay();
+            clearDistrictOverlay();
+            districtSelect.value = '';
+            btnAnalyzeRect.style.display = 'none';
+            setActiveModeButton('all');
+            setRegionScope('Tüm İstanbul', null, null);
+            if (resetView) {
+                map.setView(ISTANBUL_CENTER, DEFAULT_ZOOM, { animate: false });
+            }
+            if (fetchData !== false) {
+                fetchTemporalClusters({ fitToClusters: !resetView });
+            }
+        }
+
+        // Harita Görünümü: capture current visible bounds and analyze them.
+        function enterMapViewMode() {
+            regionMode = 'mapview';
+            activeDistrict = null;
+            resetDrawingInteraction();
+            clearRectangleOverlay();
+            clearDistrictOverlay();
+            districtSelect.value = '';
+            btnAnalyzeRect.style.display = 'none';
+            setActiveModeButton('mapview');
+            activeBbox = boundsToBbox(map.getBounds());
+            setRegionScope('Harita görünümü', activeBbox, null);
+            fetchTemporalClusters({ fitToClusters: false });
+        }
+
+        // Dikdörtgen Seç: arm rectangle drawing; fetch only after analyze click.
+        function enterRectangleDrawMode() {
+            regionMode = 'rectangle';
+            activeBbox = null;
+            activeDistrict = null;
+            clearRectangleOverlay();
+            clearDistrictOverlay();
+            districtSelect.value = '';
+            btnAnalyzeRect.style.display = 'none';
+            setActiveModeButton('rectangle');
+            drawingMode = true;
+            drawStartLatLng = null;
+            map.dragging.disable();
+            L.DomUtil.addClass(map.getContainer(), 'map-drawing');
+            setRegionScope('Dikdörtgen çizmek için haritada sürükleyin', null, null);
+        }
+
+        function finishRectangleDraw(bounds) {
+            resetDrawingInteraction();
+
+            var sw = bounds.getSouthWest();
+            var ne = bounds.getNorthEast();
+            // Reject a click / near-zero rectangle.
+            if (Math.abs(ne.lng - sw.lng) < 1e-4 || Math.abs(ne.lat - sw.lat) < 1e-4) {
+                clearRectangleOverlay();
+                activeBbox = null;
+                btnAnalyzeRect.style.display = 'none';
+                setRegionScope('Geçerli bir dikdörtgen çizilmedi — "Dikdörtgen Seç" ile tekrar deneyin', null);
+                return;
+            }
+
+            // Promote the in-progress rectangle to the persistent overlay.
+            if (drawTempRect) {
+                map.removeLayer(drawTempRect);
+                drawTempRect = null;
+            }
+            activeBbox = boundsToBbox(bounds);
+            rectangleLayer = L.rectangle(bboxToBounds(activeBbox), RECT_STYLE).addTo(map);
+            setRegionScope('Seçili dikdörtgen alan', activeBbox);
+            btnAnalyzeRect.style.display = '';
+            // Intentionally do NOT fetch here — user clicks "Seçili Alanı Analiz Et".
+        }
+
+        // İlçe: send the district key; the backend filters by the real district
+        // polygon before DBSCAN. No client-side bbox approximation is used.
+        function selectDistrict(key) {
+            if (!key) {
+                enterAllMode(true, true);
+                return;
+            }
+            regionMode = 'district';
+            activeBbox = null;
+            activeDistrict = key;
+            resetDrawingInteraction();
+            clearRectangleOverlay();          // district mode draws no rectangle overlay
+            clearDistrictOverlay();           // remove any previous district outline
+            districtSelect.value = key;
+            btnAnalyzeRect.style.display = 'none';
+            setActiveModeButton('district');  // none of the three bbox buttons stays active
+            var opt = districtSelect.options[districtSelect.selectedIndex];
+            var label = opt ? opt.text : key;
+            setRegionScope(label + ' ilçesi', null, key);
+            // Draw the real district boundary (it also fits the map to the polygon),
+            // and fetch clusters for the district. Clusters do not re-fit the map.
+            loadDistrictBoundary(key);
+            fetchTemporalClusters({ fitToClusters: false });
+        }
+
+        // ── Rectangle drawing interaction (Leaflet primitives only) ──
+
+        map.on('mousedown', function (e) {
+            if (!drawingMode) return;
+            drawStartLatLng = e.latlng;
+            if (drawTempRect) {
+                map.removeLayer(drawTempRect);
+                drawTempRect = null;
+            }
+            drawTempRect = L.rectangle(
+                L.latLngBounds(e.latlng, e.latlng),
+                RECT_STYLE
+            ).addTo(map);
+        });
+
+        map.on('mousemove', function (e) {
+            if (!drawingMode || !drawStartLatLng || !drawTempRect) return;
+            drawTempRect.setBounds(L.latLngBounds(drawStartLatLng, e.latlng));
+        });
+
+        map.on('mouseup', function (e) {
+            if (!drawingMode || !drawStartLatLng) return;
+            finishRectangleDraw(L.latLngBounds(drawStartLatLng, e.latlng));
+        });
 
         // ── Event Listeners ──────────────────────────────────────────
 
@@ -531,24 +1007,57 @@
         hourSlider.addEventListener('input', function () {
             updateHourLabel();
             clearTimeout(sliderDebounceTimer);
-            sliderDebounceTimer = setTimeout(fetchTemporalClusters, 300);
+            sliderDebounceTimer = setTimeout(refetchCurrentScope, 300);
         });
 
         datePicker.addEventListener('change', function () {
-            fetchTemporalClusters();
+            refetchCurrentScope();
         });
 
         severityFilter.addEventListener('change', function () {
-            fetchTemporalClusters();
+            refetchCurrentScope();
         });
 
         btnRefresh.addEventListener('click', function () {
-            fetchTemporalClusters();
+            // In map-view mode "Yenile" re-captures the current visible bounds.
+            if (regionMode === 'mapview') {
+                activeBbox = boundsToBbox(map.getBounds());
+                setRegionScope('Harita görünümü', activeBbox);
+            }
+            refetchCurrentScope();
+        });
+
+        btnModeAll.addEventListener('click', function () {
+            enterAllMode(true, true);
+        });
+
+        btnModeMapView.addEventListener('click', function () {
+            enterMapViewMode();
+        });
+
+        btnModeRect.addEventListener('click', function () {
+            enterRectangleDrawMode();
+        });
+
+        btnAnalyzeRect.addEventListener('click', function () {
+            if (regionMode === 'rectangle' && activeBbox) {
+                fetchTemporalClusters({ fitToClusters: false });
+            }
+        });
+
+        districtSelect.addEventListener('change', function () {
+            var key = districtSelect.value;
+            if (!key) {
+                enterAllMode(true, true);
+            } else {
+                selectDistrict(key);
+            }
         });
 
         // ── Initial Load ─────────────────────────────────────────────
         updateHourLabel();
-        fetchTemporalClusters();
+        enterAllMode(false, false);  // set scope/buttons without resetting view
+        fetchTemporalClusters();     // initial fetch fits to clusters
 
     })();
     </script>
