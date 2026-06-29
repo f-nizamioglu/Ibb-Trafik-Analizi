@@ -116,6 +116,21 @@ class TemporalClusterResponse(BaseModel):
     high_count: int = 0
     medium_count: int = 0
     low_count: int = 0
+    # ── Active clustering parameters (echoed back for the UI) ──────────────
+    # Optional so older callers / stubs that omit them still validate. The live
+    # service always populates these with the parameters actually used.
+    eps_meters: Optional[float] = Field(
+        None, description="DBSCAN eps (meters, EPSG:32636) used for this query"
+    )
+    minpoints: Optional[int] = Field(
+        None, description="DBSCAN minpoints used for this query"
+    )
+    avg_speed_threshold: Optional[float] = Field(
+        None, description="avg_speed < threshold (km/h) pre-filter used for this query"
+    )
+    window_hours: Optional[int] = Field(
+        None, description="Length of the time window (hours) used for this query"
+    )
     features: list[TemporalGeoJSONFeature]
 
 
@@ -151,3 +166,55 @@ class StatsResponse(BaseModel):
     low_severity_count: int
     date_range_start: Optional[str] = None
     date_range_end: Optional[str] = None
+
+
+# ─── Geohash Measurement-Cell Layer ───────────────────────────────────────
+# Unlike the cluster centroid markers, these features are the real İBB
+# measurement cells (geohash grid) for the selected window, drawn as the
+# rectangular geohash bounding box. They visualize the raw spatial resolution
+# of the data that feeds DBSCAN — not cluster centroids.
+
+class GeohashCellProperties(BaseModel):
+    """Aggregated stats for one geohash measurement cell over the window."""
+    geohash: str
+    measurement_count: int = Field(
+        ..., description="Number of hourly measurements aggregated for this cell"
+    )
+    avg_speed_kmh: float = Field(..., description="Mean speed across the cell's measurements")
+    min_speed_kmh: float = Field(..., description="Minimum speed across the cell's measurements")
+    max_speed_kmh: float = Field(..., description="Maximum speed across the cell's measurements")
+    sum_vehicle_count: int = Field(..., description="Total vehicles across the cell's measurements")
+    avg_vehicle_count: float = Field(..., description="Mean vehicles per measurement (cell)")
+
+
+class GeohashCellGeometry(BaseModel):
+    """GeoJSON Polygon geometry for a geohash cell bounding box (WGS84)."""
+    type: str = "Polygon"
+    coordinates: list[list[list[float]]] = Field(
+        ..., description="Single linear ring: [[[lon, lat], ...]] in GeoJSON order"
+    )
+
+
+class GeohashCellFeature(BaseModel):
+    """A single GeoJSON Feature for a geohash measurement cell."""
+    type: str = "Feature"
+    geometry: GeohashCellGeometry
+    properties: GeohashCellProperties
+
+
+class GeohashCellResponse(BaseModel):
+    """Response wrapper for the geohash measurement-cell layer."""
+    type: str = "FeatureCollection"
+    date: str = Field(..., description="Requested date (YYYY-MM-DD)")
+    hour: int = Field(..., description="Requested start hour (0-23)")
+    window_hours: int = Field(1, description="Length of the time window (hours)")
+    avg_speed_threshold: float = Field(
+        25.0, description="avg_speed < threshold (km/h) pre-filter used for this query"
+    )
+    cell_count: int = Field(0, description="Number of geohash cells returned")
+    truncated: bool = Field(
+        False,
+        description="True when more cells matched than the response cap and the "
+        "lowest-volume cells were dropped.",
+    )
+    features: list[GeohashCellFeature]

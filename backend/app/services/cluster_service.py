@@ -297,14 +297,25 @@ async def get_global_stats() -> StatsResponse:
 
 
 # ── Temporal (Hourly) Clustering ──────────────────────────────────────────
-# These parameters are tuned for single-hour time slices (~2,400 rows per hour)
+# These defaults are tuned for single-hour time slices (~2,400 rows per hour)
 # rather than the full dataset (99.6M rows). The existing pipeline defaults
 # (eps=500, minpoints=3, avg_speed<20, vehicle_count>500) are too strict
 # for hourly snapshots and yield zero clusters.
+#
+# They are DEFAULTS only: eps, minpoints, the avg_speed threshold and the
+# window length can be overridden per-request (see get_temporal_clusters).
+# The values flow into the SQL as bind parameters — never string-formatted —
+# so user-supplied numbers can never be interpolated into the statement.
 _TEMPORAL_EPS_METERS = 1000
 _TEMPORAL_MINPOINTS = 2
 _TEMPORAL_MAX_AVG_SPEED = 25  # km/h
+_TEMPORAL_WINDOW_HOURS = 1
 
+# Bind-parameter layout shared by all three temporal variants:
+#   $1 = window start (timestamp)      $4 = minpoints (int)
+#   $2 = window end   (timestamp)      $5 = avg_speed threshold (km/h)
+#   $3 = eps (meters, EPSG:32636)
+# Region-specific params follow: bbox uses $6..$9, district uses $6.
 _TEMPORAL_CLUSTER_SQL = """
 SELECT
     cluster_id,
@@ -322,24 +333,38 @@ FROM (
         avg_speed,
         geom,
         COALESCE(
-            ST_ClusterDBSCAN(geom, eps := {eps}, minpoints := {minpts}) OVER (),
+            ST_ClusterDBSCAN(
+                geom, eps := $3::double precision, minpoints := $4::integer
+            ) OVER (),
             -1
         ) AS cluster_id
     FROM ibb_traffic_density
     WHERE record_time >= $1::timestamp
       AND record_time <  $2::timestamp
-      AND avg_speed < {max_speed}
+      AND avg_speed < $5::double precision
 ) sub
 WHERE cluster_id >= 0
 GROUP BY cluster_id
 ORDER BY sum_vehicle_count DESC;
-""".format(
-    eps=_TEMPORAL_EPS_METERS,
-    minpts=_TEMPORAL_MINPOINTS,
-    max_speed=_TEMPORAL_MAX_AVG_SPEED,
-)
+"""
 
+# Like the district variant, the bbox query materializes the very selective
+# one-hour slice FIRST so the spatial filter only refines that small set. Without
+# the MATERIALIZED CTE, PostgreSQL's *generic* plan (asyncpg reuses prepared
+# statements across the pool, so the plan turns generic after a few calls) cannot
+# estimate the ST_Intersects selectivity and abandons the record_time index for a
+# GiST scan over all history — turning a ~15ms query into a multi-second one that
+# can blow past the pool's command timeout on wide bboxes. Materializing the hour
+# slice keeps it fast and plan-stable regardless of bbox size. Results are
+# unchanged; only the execution strategy is pinned.
 _TEMPORAL_CLUSTER_SQL_WITH_BBOX = """
+WITH hour_slice AS MATERIALIZED (
+    SELECT vehicle_count, avg_speed, geom
+    FROM ibb_traffic_density
+    WHERE record_time >= $1::timestamp
+      AND record_time <  $2::timestamp
+      AND avg_speed < $5::double precision
+)
 SELECT
     cluster_id,
     COUNT(*)::int                                                   AS point_count,
@@ -356,26 +381,21 @@ FROM (
         avg_speed,
         geom,
         COALESCE(
-            ST_ClusterDBSCAN(geom, eps := {eps}, minpoints := {minpts}) OVER (),
+            ST_ClusterDBSCAN(
+                geom, eps := $3::double precision, minpoints := $4::integer
+            ) OVER (),
             -1
         ) AS cluster_id
-    FROM ibb_traffic_density
-    WHERE record_time >= $1::timestamp
-      AND record_time <  $2::timestamp
-      AND avg_speed < {max_speed}
-      AND ST_Intersects(
+    FROM hour_slice
+    WHERE ST_Intersects(
           geom,
-          ST_Transform(ST_MakeEnvelope($3, $4, $5, $6, 4326), 32636)
+          ST_Transform(ST_MakeEnvelope($6, $7, $8, $9, 4326), 32636)
       )
 ) sub
 WHERE cluster_id >= 0
 GROUP BY cluster_id
 ORDER BY sum_vehicle_count DESC;
-""".format(
-    eps=_TEMPORAL_EPS_METERS,
-    minpts=_TEMPORAL_MINPOINTS,
-    max_speed=_TEMPORAL_MAX_AVG_SPEED,
-)
+"""
 
 # District mode: filter the one-hour slice by the real district polygon BEFORE
 # DBSCAN, then cluster the district subset. The polygon comes from
@@ -393,12 +413,12 @@ WITH hour_slice AS MATERIALIZED (
     FROM ibb_traffic_density
     WHERE record_time >= $1::timestamp
       AND record_time <  $2::timestamp
-      AND avg_speed < {max_speed}
+      AND avg_speed < $5::double precision
 ),
 dist AS MATERIALIZED (
     SELECT geom
     FROM istanbul_district_boundaries
-    WHERE district_key = $3
+    WHERE district_key = $6
 )
 SELECT
     cluster_id,
@@ -416,7 +436,9 @@ FROM (
         h.avg_speed,
         h.geom,
         COALESCE(
-            ST_ClusterDBSCAN(h.geom, eps := {eps}, minpoints := {minpts}) OVER (),
+            ST_ClusterDBSCAN(
+                h.geom, eps := $3::double precision, minpoints := $4::integer
+            ) OVER (),
             -1
         ) AS cluster_id
     FROM hour_slice h
@@ -427,11 +449,7 @@ FROM (
 WHERE cluster_id >= 0
 GROUP BY cluster_id
 ORDER BY sum_vehicle_count DESC;
-""".format(
-    eps=_TEMPORAL_EPS_METERS,
-    minpts=_TEMPORAL_MINPOINTS,
-    max_speed=_TEMPORAL_MAX_AVG_SPEED,
-)
+"""
 
 # Volume gates derived from 2025-01-17 hourly validation (cluster sum_vehicle_count).
 # Hour 18 peak cluster ~15k vehicles; hour 23 peak ~1.9k; smallest meaningful
@@ -677,8 +695,18 @@ async def get_temporal_clusters(
     hour: int,
     bbox: tuple[float, float, float, float] | None = None,
     district: str | None = None,
+    *,
+    eps_meters: float = _TEMPORAL_EPS_METERS,
+    minpoints: int = _TEMPORAL_MINPOINTS,
+    avg_speed_threshold: float = _TEMPORAL_MAX_AVG_SPEED,
+    window_hours: int = _TEMPORAL_WINDOW_HOURS,
 ) -> TemporalClusterResponse:
-    """Run spatial DBSCAN on a single-hour slice and return clustered GeoJSON.
+    """Run spatial DBSCAN on a time-window slice and return clustered GeoJSON.
+
+    The window starts at *date_str*/*hour* and spans *window_hours* hours
+    (default 1, preserving the original single-hour behavior). Measurements
+    with avg_speed below *avg_speed_threshold* are pre-filtered, then PostGIS
+    ST_ClusterDBSCAN runs with the given *eps_meters* / *minpoints*.
 
     When *district* is given, traffic measurements are filtered by the real
     district polygon (from istanbul_district_boundaries) BEFORE clustering, so
@@ -690,20 +718,36 @@ async def get_temporal_clusters(
     date_str : str
         Date in YYYY-MM-DD format.
     hour : int
-        Hour of day (0-23).
+        Start hour of day (0-23).
     bbox : tuple[float, float, float, float], optional
         WGS84 bbox as min_lon, min_lat, max_lon, max_lat.
     district : str, optional
         Normalized district key (e.g. "besiktas") to filter by real polygon.
+    eps_meters : float
+        DBSCAN neighborhood radius in meters (EPSG:32636). Default 1000.
+    minpoints : int
+        DBSCAN minimum points to form a cluster. Default 2.
+    avg_speed_threshold : float
+        Pre-filter: keep only measurements with avg_speed < this (km/h). Default 25.
+    window_hours : int
+        Number of hours spanned by the time window. Default 1.
 
     Returns
     -------
     TemporalClusterResponse
         GeoJSON FeatureCollection with per-cluster centroids, severity,
-        vehicle counts, and response metadata.
+        vehicle counts, the active parameters, and response metadata.
     """
     if hour < 0 or hour > 23:
         raise ValueError("Invalid hour. Expected an integer between 0 and 23.")
+    if eps_meters <= 0:
+        raise ValueError("Invalid eps_meters. Expected a positive distance in meters.")
+    if minpoints < 1:
+        raise ValueError("Invalid minpoints. Expected an integer >= 1.")
+    if avg_speed_threshold <= 0:
+        raise ValueError("Invalid avg_speed_threshold. Expected a positive speed in km/h.")
+    if window_hours < 1:
+        raise ValueError("Invalid window_hours. Expected an integer >= 1.")
 
     try:
         selected_date = datetime.strptime(date_str, "%Y-%m-%d")
@@ -713,7 +757,7 @@ async def get_temporal_clusters(
         ) from exc
 
     start_ts = selected_date.replace(hour=hour, minute=0, second=0, microsecond=0)
-    end_ts = start_ts + timedelta(hours=1)
+    end_ts = start_ts + timedelta(hours=window_hours)
 
     pool = await get_pool()
     t0 = time.monotonic()
@@ -721,25 +765,27 @@ async def get_temporal_clusters(
         if district is not None:
             await _ensure_district_available(conn, district)
             rows = await conn.fetch(
-                _TEMPORAL_CLUSTER_SQL_WITH_DISTRICT, start_ts, end_ts, district
+                _TEMPORAL_CLUSTER_SQL_WITH_DISTRICT,
+                start_ts, end_ts, eps_meters, minpoints, avg_speed_threshold, district,
             )
         elif bbox is None:
-            rows = await conn.fetch(_TEMPORAL_CLUSTER_SQL, start_ts, end_ts)
+            rows = await conn.fetch(
+                _TEMPORAL_CLUSTER_SQL,
+                start_ts, end_ts, eps_meters, minpoints, avg_speed_threshold,
+            )
         else:
             rows = await conn.fetch(
                 _TEMPORAL_CLUSTER_SQL_WITH_BBOX,
-                start_ts,
-                end_ts,
-                bbox[0],
-                bbox[1],
-                bbox[2],
-                bbox[3],
+                start_ts, end_ts, eps_meters, minpoints, avg_speed_threshold,
+                bbox[0], bbox[1], bbox[2], bbox[3],
             )
     elapsed_ms = (time.monotonic() - t0) * 1000
 
     logger.info(
-        "Temporal clustering: date=%s hour=%02d district=%s clusters=%d elapsed=%.1fms",
-        date_str, hour, district or "-", len(rows), elapsed_ms,
+        "Temporal clustering: date=%s hour=%02d window=%dh eps=%.0f minpts=%d "
+        "speed<%.1f district=%s clusters=%d elapsed=%.1fms",
+        date_str, hour, window_hours, eps_meters, minpoints,
+        avg_speed_threshold, district or "-", len(rows), elapsed_ms,
     )
 
     if not rows:
@@ -747,6 +793,10 @@ async def get_temporal_clusters(
             date=date_str,
             hour=hour,
             cluster_count=0,
+            eps_meters=eps_meters,
+            minpoints=minpoints,
+            avg_speed_threshold=avg_speed_threshold,
+            window_hours=window_hours,
             features=[],
         )
 
@@ -808,5 +858,9 @@ async def get_temporal_clusters(
         high_count=high_count,
         medium_count=medium_count,
         low_count=low_count,
+        eps_meters=eps_meters,
+        minpoints=minpoints,
+        avg_speed_threshold=avg_speed_threshold,
+        window_hours=window_hours,
         features=features,
     )

@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from backend.app.limiter import limiter
 from backend.app.models.cluster import (
     GeoJSONFeatureCollection,
+    GeohashCellResponse,
     StatsResponse,
     TemporalClusterResponse,
 )
@@ -32,6 +33,7 @@ from backend.app.services.cluster_service import (
     get_temporal_clusters,
 )
 from backend.app.services.district_utils import normalize_district_key
+from backend.app.services.geohash_service import get_geohash_cells
 
 router = APIRouter()
 
@@ -90,6 +92,42 @@ async def list_clusters(
             "district polygon. Requires 'date' and 'hour'; mutually exclusive "
             "with the bbox parameters."
         ),
+    ),
+    eps_meters: Optional[float] = Query(
+        None,
+        description=(
+            "Temporal mode only: DBSCAN neighborhood radius in meters "
+            "(EPSG:32636). Default 1000 when omitted."
+        ),
+        ge=100,
+        le=5000,
+    ),
+    minpoints: Optional[int] = Query(
+        None,
+        description=(
+            "Temporal mode only: DBSCAN minimum points to form a cluster. "
+            "Default 2 when omitted."
+        ),
+        ge=1,
+        le=50,
+    ),
+    avg_speed_threshold: Optional[float] = Query(
+        None,
+        description=(
+            "Temporal mode only: keep measurements with avg_speed below this "
+            "(km/h) before DBSCAN. Default 25 when omitted."
+        ),
+        gt=0,
+        le=120,
+    ),
+    window_hours: Optional[int] = Query(
+        None,
+        description=(
+            "Temporal mode only: number of hours in the time window starting "
+            "at the selected hour. Default 1 when omitted."
+        ),
+        ge=1,
+        le=24,
     ),
 ):
     """
@@ -153,15 +191,28 @@ async def list_clusters(
                 detail="'district' and bbox parameters are mutually exclusive.",
             )
 
+    # Optional clustering tuning params (temporal mode only). Only forwarded
+    # when explicitly supplied, so the default call path — and its tests — stays
+    # exactly as before (get_temporal_clusters(date, hour) with empty kwargs).
+    tuning: dict = {}
+    if eps_meters is not None:
+        tuning["eps_meters"] = eps_meters
+    if minpoints is not None:
+        tuning["minpoints"] = minpoints
+    if avg_speed_threshold is not None:
+        tuning["avg_speed_threshold"] = avg_speed_threshold
+    if window_hours is not None:
+        tuning["window_hours"] = window_hours
+
     # ── Temporal mode ─────────────────────────────────────────────────
     if date is not None and hour is not None:
         try:
             if district_key is not None:
-                result = await get_temporal_clusters(date, hour, district=district_key)
+                result = await get_temporal_clusters(date, hour, district=district_key, **tuning)
             elif bbox is None:
-                result = await get_temporal_clusters(date, hour)
+                result = await get_temporal_clusters(date, hour, **tuning)
             else:
-                result = await get_temporal_clusters(date, hour, bbox=bbox)
+                result = await get_temporal_clusters(date, hour, bbox=bbox, **tuning)
         except DistrictBoundariesNotImported as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
@@ -233,6 +284,124 @@ async def list_clusters(
         scored = [c for c in scored if c["severity"] == severity.upper()]
 
     return build_geojson(scored)
+
+
+@router.get("/geohash-cells", response_model=GeohashCellResponse)
+@limiter.limit("60/minute")
+async def list_geohash_cells(
+    request: Request,
+    date: str = Query(
+        ...,
+        description="Date (YYYY-MM-DD). Required.",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    ),
+    hour: int = Query(
+        ...,
+        description="Start hour of day (0-23). Required.",
+        ge=0,
+        le=23,
+    ),
+    avg_speed_threshold: Optional[float] = Query(
+        None,
+        description="Keep measurements with avg_speed below this (km/h). Default 25.",
+        gt=0,
+        le=120,
+    ),
+    window_hours: Optional[int] = Query(
+        None,
+        description="Number of hours in the window starting at 'hour'. Default 1.",
+        ge=1,
+        le=24,
+    ),
+    min_lon: Optional[float] = Query(
+        None, description="Minimum longitude for optional WGS84 bbox filter.",
+        ge=-180, le=180,
+    ),
+    min_lat: Optional[float] = Query(
+        None, description="Minimum latitude for optional WGS84 bbox filter.",
+        ge=-90, le=90,
+    ),
+    max_lon: Optional[float] = Query(
+        None, description="Maximum longitude for optional WGS84 bbox filter.",
+        ge=-180, le=180,
+    ),
+    max_lat: Optional[float] = Query(
+        None, description="Maximum latitude for optional WGS84 bbox filter.",
+        ge=-90, le=90,
+    ),
+    district: Optional[str] = Query(
+        None,
+        description=(
+            "Optional district key (e.g. 'besiktas') to filter by the real "
+            "district polygon. Mutually exclusive with the bbox parameters."
+        ),
+    ),
+):
+    """
+    Geohash measurement-cell layer as a GeoJSON Polygon FeatureCollection.
+
+    Returns the real İBB measurement cells (geohash grid) for the selected
+    window, each as its rectangular geohash bounding box with aggregated
+    speed/volume stats. The same window + avg_speed pre-filter (+ optional
+    bbox/district region) used for clustering is applied, so these polygons
+    are exactly the measurements that feed DBSCAN — not cluster centroids.
+
+    bbox and district are mutually exclusive; both filter measurements BEFORE
+    aggregation. Region rules mirror /api/clusters.
+    """
+    bbox_values = (min_lon, min_lat, max_lon, max_lat)
+    bbox_flags = [value is not None for value in bbox_values]
+    if any(bbox_flags) and not all(bbox_flags):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "All bbox parameters must be provided together: "
+                "min_lon, min_lat, max_lon, max_lat."
+            ),
+        )
+
+    bbox = None
+    if all(bbox_flags):
+        if min_lon >= max_lon:
+            raise HTTPException(
+                status_code=400, detail="'min_lon' must be less than 'max_lon'.",
+            )
+        if min_lat >= max_lat:
+            raise HTTPException(
+                status_code=400, detail="'min_lat' must be less than 'max_lat'.",
+            )
+        bbox = (min_lon, min_lat, max_lon, max_lat)
+
+    district_key = None
+    if district is not None:
+        district_key = normalize_district_key(district)
+        if not district_key:
+            raise HTTPException(
+                status_code=400, detail="'district' must be a non-empty value.",
+            )
+        if bbox is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' and bbox parameters are mutually exclusive.",
+            )
+
+    tuning: dict = {}
+    if avg_speed_threshold is not None:
+        tuning["avg_speed_threshold"] = avg_speed_threshold
+    if window_hours is not None:
+        tuning["window_hours"] = window_hours
+
+    try:
+        if district_key is not None:
+            return await get_geohash_cells(date, hour, district=district_key, **tuning)
+        if bbox is None:
+            return await get_geohash_cells(date, hour, **tuning)
+        return await get_geohash_cells(date, hour, bbox=bbox, **tuning)
+    except DistrictBoundariesNotImported as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        # Includes UnknownDistrict (a ValueError subclass) → 400, matching /clusters.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/clusters/{cluster_id}", response_model=GeoJSONFeatureCollection)

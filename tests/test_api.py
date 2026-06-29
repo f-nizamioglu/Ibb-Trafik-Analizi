@@ -520,6 +520,289 @@ def test_congestion_severe_slowdown_can_be_high():
     assert tiny_severity == "LOW"
 
 
+# ── Dynamic clustering parameters on /api/clusters ───────────────────────────
+
+def test_temporal_clusters_accepts_all_tuning_params(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18"
+        "&eps_meters=750&minpoints=3&avg_speed_threshold=20&window_hours=2"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {
+                "eps_meters": 750.0,
+                "minpoints": 3,
+                "avg_speed_threshold": 20.0,
+                "window_hours": 2,
+            },
+        }
+    ]
+
+
+def test_temporal_clusters_forwards_only_supplied_tuning(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    # Only eps_meters is given; nothing else should be forwarded.
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&eps_meters=1200")
+
+    assert r.status_code == 200
+    assert calls == [{"args": ("2025-01-17", 18), "kwargs": {"eps_meters": 1200.0}}]
+
+
+def test_temporal_clusters_tuning_combines_with_district(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get("/api/clusters?date=2025-01-17&hour=18&district=besiktas&minpoints=4")
+
+    assert r.status_code == 200
+    assert calls == [
+        {"args": ("2025-01-17", 18), "kwargs": {"district": "besiktas", "minpoints": 4}}
+    ]
+
+
+def test_temporal_clusters_tuning_combines_with_bbox(temporal_cluster_client):
+    client, calls = temporal_cluster_client
+
+    r = client.get(
+        "/api/clusters?date=2025-01-17&hour=18&window_hours=3"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {"bbox": (28.95, 41.02, 29.08, 41.10), "window_hours": 3},
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "bad_param",
+    [
+        "eps_meters=10",          # below ge=100
+        "eps_meters=99999",       # above le=5000
+        "minpoints=0",            # below ge=1
+        "minpoints=500",          # above le=50
+        "avg_speed_threshold=0",  # not gt=0
+        "avg_speed_threshold=999",  # above le=120
+        "window_hours=0",         # below ge=1
+        "window_hours=99",        # above le=24
+    ],
+)
+def test_temporal_clusters_rejects_out_of_range_tuning(temporal_cluster_client, bad_param):
+    client, calls = temporal_cluster_client
+
+    r = client.get(f"/api/clusters?date=2025-01-17&hour=18&{bad_param}")
+
+    assert r.status_code == 422, bad_param
+    assert calls == []
+
+
+# ── Geohash measurement-cell layer (/api/geohash-cells) ──────────────────────
+
+@pytest.fixture
+def geohash_cells_client(monkeypatch):
+    """FastAPI test client with geohash-cell retrieval stubbed."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.models.cluster import GeohashCellResponse
+    from backend.app.routers import clusters as clusters_router
+
+    calls = []
+
+    async def fake_get_geohash_cells(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return GeohashCellResponse(
+            date=args[0],
+            hour=args[1],
+            cell_count=0,
+            features=[],
+        )
+
+    monkeypatch.setattr(
+        clusters_router, "get_geohash_cells", fake_get_geohash_cells
+    )
+
+    app = FastAPI()
+    app.include_router(clusters_router.router, prefix="/api")
+    with TestClient(app) as client:
+        yield client, calls
+
+
+def test_geohash_cells_accepts_date_hour(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get("/api/geohash-cells?date=2025-01-17&hour=18")
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "FeatureCollection"
+    assert data["date"] == "2025-01-17"
+    assert data["hour"] == 18
+    assert calls == [{"args": ("2025-01-17", 18), "kwargs": {}}]
+
+
+def test_geohash_cells_requires_date_and_hour(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    assert client.get("/api/geohash-cells?date=2025-01-17").status_code == 422
+    assert client.get("/api/geohash-cells?hour=18").status_code == 422
+    assert calls == []
+
+
+def test_geohash_cells_forwards_window_and_threshold(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18&avg_speed_threshold=20&window_hours=2"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {"avg_speed_threshold": 20.0, "window_hours": 2},
+        }
+    ]
+
+
+def test_geohash_cells_accepts_full_bbox(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {"args": ("2025-01-17", 18), "kwargs": {"bbox": (28.95, 41.02, 29.08, 41.10)}}
+    ]
+
+
+def test_geohash_cells_rejects_partial_bbox(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get("/api/geohash-cells?date=2025-01-17&hour=18&min_lon=28.95")
+
+    assert r.status_code == 400
+    assert "All bbox parameters" in r.json()["detail"]
+    assert calls == []
+
+
+def test_geohash_cells_rejects_inverted_bbox(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18"
+        "&min_lon=29.08&min_lat=41.02&max_lon=28.95&max_lat=41.10"
+    )
+
+    assert r.status_code == 400
+    assert "min_lon" in r.json()["detail"]
+    assert calls == []
+
+
+def test_geohash_cells_invalid_latlon_returns_422(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18"
+        "&min_lon=-181&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 422
+    assert calls == []
+
+
+def test_geohash_cells_district_and_bbox_mutually_exclusive(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18&district=besiktas"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 400
+    assert "mutually exclusive" in r.json()["detail"]
+    assert calls == []
+
+
+def test_geohash_cells_accepts_and_normalizes_district(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get("/api/geohash-cells?date=2025-01-17&hour=18&district=BESIKTAS")
+
+    assert r.status_code == 200
+    assert calls == [{"args": ("2025-01-17", 18), "kwargs": {"district": "besiktas"}}]
+
+
+def test_geohash_cells_invalid_district_returns_400(geohash_cells_client, monkeypatch):
+    client, calls = geohash_cells_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.cluster_service import UnknownDistrict
+
+    async def raise_unknown(*args, **kwargs):
+        raise UnknownDistrict("Unknown district: atlantis")
+
+    monkeypatch.setattr(clusters_router, "get_geohash_cells", raise_unknown)
+
+    r = client.get("/api/geohash-cells?date=2025-01-17&hour=18&district=atlantis")
+
+    assert r.status_code == 400
+    assert "Unknown district" in r.json()["detail"]
+
+
+def test_geohash_cells_not_imported_returns_503(geohash_cells_client, monkeypatch):
+    client, calls = geohash_cells_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.cluster_service import (
+        DISTRICT_NOT_IMPORTED_MSG,
+        DistrictBoundariesNotImported,
+    )
+
+    async def raise_not_imported(*args, **kwargs):
+        raise DistrictBoundariesNotImported(DISTRICT_NOT_IMPORTED_MSG)
+
+    monkeypatch.setattr(clusters_router, "get_geohash_cells", raise_not_imported)
+
+    r = client.get("/api/geohash-cells?date=2025-01-17&hour=18&district=besiktas")
+
+    assert r.status_code == 503
+    assert "not imported" in r.json()["detail"].lower()
+
+
+# ── Geohash polygon geometry (pure, no DB) ───────────────────────────────────
+
+def test_geohash_to_polygon_is_closed_ring_in_lonlat_order():
+    from backend.app.services.geohash_service import _geohash_to_polygon
+    from scoring.geohash_utils import decode_geohash_bounds
+
+    gh = "sxk9"  # a valid base32 geohash
+    poly = _geohash_to_polygon(gh)
+
+    assert len(poly) == 1            # single linear ring
+    ring = poly[0]
+    assert len(ring) == 5            # 4 corners + closing point
+    assert ring[0] == ring[-1]       # ring is closed
+
+    min_lat, min_lon, max_lat, max_lon = decode_geohash_bounds(gh)
+    # Corner order: SW, SE, NE, NW, SW — each as [lon, lat]
+    assert ring[0] == [min_lon, min_lat]
+    assert ring[1] == [max_lon, min_lat]
+    assert ring[2] == [max_lon, max_lat]
+    assert ring[3] == [min_lon, max_lat]
+
+
 # ── Live DB endpoint tests (skipped if no DB) ────────────────────────────────
 
 @pytest.mark.db

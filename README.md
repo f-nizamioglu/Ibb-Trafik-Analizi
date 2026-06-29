@@ -190,6 +190,8 @@ uvicorn backend.app.main:app --reload --port 8000
 | `GET /api/districts/{district_key}/boundary` | Seçili ilçenin sınır poligonunu WGS84 (EPSG:4326) GeoJSON olarak döndürür; harita üzerinde çizgi olarak gösterilir. |
 | `GET /api/districts/besiktas/boundary` | Beşiktaş için örnek ilçe sınır endpoint'i; haritadaki ilçe poligonu bindirmesini besler. |
 | `GET /api/clusters?date=YYYY-MM-DD&hour=HH&severity=HIGH` | Ana sorguyu `LOW`, `MEDIUM` veya `HIGH` yoğunluk düzeyiyle filtreler. |
+| `GET /api/clusters?date=...&hour=...&eps_meters=&minpoints=&avg_speed_threshold=&window_hours=` | Temporal modda kümeleme parametrelerini isteğe bağlı olarak ayarlar (varsayılanlar: 1000 m, 2, 25 km/h, 1 saat). |
+| `GET /api/geohash-cells?date=YYYY-MM-DD&hour=HH` | Seçilen penceredeki ölçüm hücrelerini (geohash kafesi) poligon (GeoJSON) olarak döndürür; isteğe bağlı `avg_speed_threshold`, `window_hours`, bbox ve `district` kabul eder. |
 | `GET /api/heatmap` | Isı haritası noktalarını döndürür. |
 | `GET /api/heatmap?date=YYYY-MM-DD` | Isı haritası noktalarını tarihe göre filtreler. |
 | `GET /api/clusters` | Legacy toplulaştırılmış küme çıktısı; `run_pipeline.py` sonrası anlamlıdır. |
@@ -249,11 +251,42 @@ Bölge filtresi aktif olduğunda sistem, seçilen alan içindeki ölçümleri al
 
 > **Not:** İlçe modu yalnızca geçerli bir GeoJSON içe aktarıldıktan sonra çalışır; gerçek poligon doğrulaması (SRID, geçerlilik, sınır kontrolü) bu içe aktarma adımıyla yapılır.
 
+## Kümeleme Parametreleri (Dinamik)
+
+Temporal modda kümeleme parametreleri arayüzdeki **Kümeleme Parametreleri** satırından veya doğrudan API sorgu parametreleriyle ayarlanabilir. Varsayılan değerler mevcut davranışı birebir korur; bir parametre yalnızca varsayılandan farklıysa API'ye gönderilir (böylece varsayılan istek `/api/clusters?date=...&hour=...` olarak kalır).
+
+| Parametre | API alanı | Varsayılan | Aralık | Açıklama |
+| --- | --- | --- | --- | --- |
+| Hız eşiği | `avg_speed_threshold` | 25 km/h | 0–120 | `avg_speed < eşik` ön filtresi. |
+| DBSCAN eps | `eps_meters` | 1000 m | 100–5000 | `ST_ClusterDBSCAN` komşuluk yarıçapı (EPSG:32636). |
+| Min. nokta | `minpoints` | 2 | 1–50 | Bir küme oluşması için gereken en az nokta sayısı. |
+| Zaman penceresi | `window_hours` | 1 saat | 1–24 | Seçilen saatten başlayan pencere uzunluğu. |
+
+Tüm değerler SQL'e yalnızca bind parametresi olarak aktarılır; kullanıcı değeri sorgu metnine asla gömülmez. `window_hours=1` varsayılanı "seçilen tarih/saat için bir saatlik zaman penceresi" davranışını korur; daha büyük değerler çok saatli bir pencere oluşturur.
+
+```text
+/api/clusters?date=2025-01-17&hour=18&eps_meters=750&minpoints=3&avg_speed_threshold=20&window_hours=2
+```
+
+## Ölçüm Hücresi Katmanı (Geohash)
+
+Arayüzdeki **Ölçüm hücreleri (geohash)** anahtarı, seçilen penceredeki İBB ölçüm hücrelerini gerçek geohash kafesi sınırlarıyla (dikdörtgen poligon) haritada gösterir. Küme merkezi işaretçilerinin aksine bu katman verinin ham uzamsal çözünürlüğünü görselleştirir: aynı zaman penceresi ve `avg_speed < eşik` ön filtresi (ve aktif bbox/ilçe kapsamı) uygulanır, böylece gösterilen hücreler DBSCAN'in kümelediği ölçümlerle aynıdır.
+
+Hücre sınırları `geom` noktasından değil kayıtlı `geohash` dizesinden çözülür ve EPSG:4326 GeoJSON poligonu olarak döndürülür. Hücre rengi ortalama hıza göre belirlenir (yavaş = kırmızıya yakın). Katman, küme işaretçilerinin altında ayrı bir Leaflet panosunda çizilir; işaretçiler her zaman üstte ve tıklanabilir kalır. Çok sayıda hücre dönerse yanıt en yüksek araç hacmine göre kırpılır (`truncated` alanı bunu bildirir).
+
+```text
+/api/geohash-cells?date=2025-01-17&hour=18
+/api/geohash-cells?date=2025-01-17&hour=18&avg_speed_threshold=20&window_hours=2
+/api/geohash-cells?date=2025-01-17&hour=18&district=besiktas
+```
+
+Hücre poligonları da, küme merkezleri gibi, gerçek araç/sensör/yol noktası değildir; her biri bir geohash ölçüm hücresinin kapsadığı alanı gösterir.
+
 ## Yöntem Özeti
 
 Ana endpoint seçilen tarih ve saatten bir saatlik zaman penceresi oluşturur. Bu pencere içinde `avg_speed < 25` koşulunu sağlayan ölçümler alınır. PostGIS `ST_ClusterDBSCAN` fonksiyonu EPSG:32636 metrik geometri üzerinde çalışır.
 
-Saatlik akışta kullanılan parametreler `eps=1000` ve `minpoints=2` değerleridir. Haritadaki işaretçiler araç, sensör veya yol segmenti değil, DBSCAN küme merkezleridir. `congestion_score` kullanıcı arayüzü için hesaplanan yoğunluk/görselleştirme skorudur.
+Saatlik akıştaki varsayılan parametreler `eps=1000`, `minpoints=2`, `avg_speed < 25` ve 1 saatlik penceredir; bu değerler arayüz veya API üzerinden ayarlanabilir (bkz. [Kümeleme Parametreleri (Dinamik)](#kümeleme-parametreleri-dinamik)). Haritadaki işaretçiler araç, sensör veya yol segmenti değil, DBSCAN küme merkezleridir. `congestion_score` kullanıcı arayüzü için hesaplanan yoğunluk/görselleştirme skorudur.
 
 ## Test ve Kontrol
 

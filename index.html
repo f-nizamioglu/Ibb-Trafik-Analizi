@@ -124,6 +124,40 @@
             background: #d8e6f8;
         }
 
+        /* ── Clustering Parameter Controls + Layer Toggle ────────────── */
+        .param-controls {
+            background: #f4f6f8;
+        }
+        .param-controls > .control-group > label {
+            font-weight: 600;
+            color: #333;
+        }
+        .param-controls input[type="range"] {
+            width: 118px;
+        }
+        .param-value {
+            font-size: 12.5px;
+            color: #222;
+            min-width: 58px;
+            font-variant-numeric: tabular-nums;
+        }
+        .param-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: #444;
+        }
+        .param-toggle input { cursor: pointer; }
+        .param-info {
+            font-size: 12px;
+            color: #777;
+            min-width: 96px;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* ── Region Summary Panel ───────────────────────────────────── */
         .region-panel {
             background: #eef3fb;
@@ -235,6 +269,9 @@
             display: inline-block;
             flex-shrink: 0;
         }
+        .legend-color.square { border-radius: 2px; }
+        .legend-sep { border-top: 1px solid #eee; margin: 6px 0 3px; }
+        .legend-note { font-size: 11px; color: #888; margin-top: 2px; }
 
         /* ── Status Messages ────────────────────────────────────────── */
         .status-message {
@@ -335,6 +372,40 @@
         </div>
     </div>
 
+    <!-- Clustering Parameters + Measurement-Cell Layer -->
+    <div class="controls param-controls">
+        <div class="control-group">
+            <label>Kümeleme Parametreleri:</label>
+        </div>
+        <div class="control-group">
+            <label for="speedThreshold">Hız eşiği:</label>
+            <input type="range" id="speedThreshold" min="5" max="60" step="1" value="25">
+            <span class="param-value" id="speedThresholdLabel">&lt; 25 km/h</span>
+        </div>
+        <div class="control-group">
+            <label for="epsMeters">DBSCAN eps:</label>
+            <input type="range" id="epsMeters" min="100" max="3000" step="100" value="1000">
+            <span class="param-value" id="epsMetersLabel">1000 m</span>
+        </div>
+        <div class="control-group">
+            <label for="minPoints">Min. nokta:</label>
+            <input type="range" id="minPoints" min="1" max="10" step="1" value="2">
+            <span class="param-value" id="minPointsLabel">2</span>
+        </div>
+        <div class="control-group">
+            <label for="windowHours">Zaman penceresi:</label>
+            <input type="range" id="windowHours" min="1" max="6" step="1" value="1">
+            <span class="param-value" id="windowHoursLabel">1 saat</span>
+        </div>
+        <button class="btn-refresh" id="btnResetParams" title="Parametreleri varsayılana döndür">Sıfırla</button>
+        <div class="control-group">
+            <label class="param-toggle" for="toggleGeohash">
+                <input type="checkbox" id="toggleGeohash"> Ölçüm hücreleri (geohash)
+            </label>
+            <span class="param-info" id="geohashInfo"></span>
+        </div>
+    </div>
+
     <!-- Region Summary Panel -->
     <div class="region-panel" id="regionPanel">
         <div class="region-panel-main">
@@ -396,6 +467,11 @@
             LOW:    'Düşük Yoğunluk'
         };
 
+        // Default clustering parameters — must match the backend service defaults.
+        // A param is only sent to the API when it differs from its default, so the
+        // default request stays /api/clusters?date=...&hour=... (clean demo URL).
+        var DEFAULT_PARAMS = { speed: 25, eps: 1000, minpts: 2, windowHours: 1 };
+
         // District mode sends the district key to the backend, which filters
         // traffic by the real district polygon (istanbul_district_boundaries)
         // before DBSCAN. The <option value="..."> keys are the district keys;
@@ -442,6 +518,25 @@
             };
         }
 
+        // Geohash measurement-cell fill ramp: slower avg speed = more congested = redder.
+        function geohashCellColor(avgSpeed) {
+            if (avgSpeed <= 10) return '#7f0000';
+            if (avgSpeed <= 15) return '#c62828';
+            if (avgSpeed <= 20) return '#e53935';
+            if (avgSpeed <= 25) return '#fb8c00';
+            if (avgSpeed <= 35) return '#fdd835';
+            return '#9ccc65';
+        }
+        function geohashCellStyle(props) {
+            return {
+                color: '#444',
+                weight: 1,
+                opacity: 0.55,
+                fillColor: geohashCellColor(props.avg_speed_kmh),
+                fillOpacity: 0.5
+            };
+        }
+
         // ── DOM Elements ─────────────────────────────────────────────
         var datePicker     = document.getElementById('datePicker');
         var hourSlider     = document.getElementById('hourSlider');
@@ -462,6 +557,17 @@
         var cardAvgSpeed      = document.getElementById('cardAvgSpeed');
         var cardTotalVehicles = document.getElementById('cardTotalVehicles');
         var cardHighCount     = document.getElementById('cardHighCount');
+        var speedThreshold      = document.getElementById('speedThreshold');
+        var epsMeters           = document.getElementById('epsMeters');
+        var minPoints           = document.getElementById('minPoints');
+        var windowHours         = document.getElementById('windowHours');
+        var speedThresholdLabel = document.getElementById('speedThresholdLabel');
+        var epsMetersLabel      = document.getElementById('epsMetersLabel');
+        var minPointsLabel      = document.getElementById('minPointsLabel');
+        var windowHoursLabel    = document.getElementById('windowHoursLabel');
+        var btnResetParams      = document.getElementById('btnResetParams');
+        var toggleGeohash       = document.getElementById('toggleGeohash');
+        var geohashInfo         = document.getElementById('geohashInfo');
 
         // ── Map Setup ────────────────────────────────────────────────
         var map = L.map('map').setView(ISTANBUL_CENTER, DEFAULT_ZOOM);
@@ -471,6 +577,13 @@
         }).addTo(map);
 
         var clusterLayer = null;
+
+        // Geohash cells render in their own pane below the cluster markers, so the
+        // centroid markers always stay on top and remain clickable.
+        map.createPane('geohashPane');
+        map.getPane('geohashPane').style.zIndex = 350;
+        var geohashLayer = null;
+        var geohashAbortController = null;
 
         // ── Region state ─────────────────────────────────────────────
         // regionMode: 'all' | 'mapview' | 'rectangle' | 'district'
@@ -496,7 +609,10 @@
                 '<strong>Lejant</strong>' +
                 '<div class="legend-item"><span class="legend-color" style="background:#d32f2f"></span> Yüksek Yoğunluk</div>' +
                 '<div class="legend-item"><span class="legend-color" style="background:#f57c00"></span> Orta Yoğunluk</div>' +
-                '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> Düşük Yoğunluk</div>';
+                '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> Düşük Yoğunluk</div>' +
+                '<div class="legend-sep"></div>' +
+                '<div class="legend-item"><span class="legend-color square" style="background:#e53935;opacity:0.55"></span> Ölçüm hücresi (geohash)</div>' +
+                '<div class="legend-note">Hücre yavaşladıkça kırmızıya yaklaşır</div>';
             return div;
         };
         legend.addTo(map);
@@ -513,6 +629,34 @@
 
         function getSelectedSeverity() {
             return severityFilter.value;
+        }
+
+        function getSpeedThreshold() { return parseInt(speedThreshold.value, 10); }
+        function getEpsMeters()      { return parseInt(epsMeters.value, 10); }
+        function getMinPoints()      { return parseInt(minPoints.value, 10); }
+        function getWindowHours()    { return parseInt(windowHours.value, 10); }
+
+        function updateParamLabels() {
+            speedThresholdLabel.textContent = '< ' + getSpeedThreshold() + ' km/h';
+            epsMetersLabel.textContent = getEpsMeters() + ' m';
+            minPointsLabel.textContent = getMinPoints();
+            windowHoursLabel.textContent = getWindowHours() + ' saat';
+        }
+
+        // Append only the non-default clustering params to a URLSearchParams.
+        function appendClusterParams(params) {
+            if (getSpeedThreshold() !== DEFAULT_PARAMS.speed) {
+                params.set('avg_speed_threshold', getSpeedThreshold());
+            }
+            if (getEpsMeters() !== DEFAULT_PARAMS.eps) {
+                params.set('eps_meters', getEpsMeters());
+            }
+            if (getMinPoints() !== DEFAULT_PARAMS.minpts) {
+                params.set('minpoints', getMinPoints());
+            }
+            if (getWindowHours() !== DEFAULT_PARAMS.windowHours) {
+                params.set('window_hours', getWindowHours());
+            }
         }
 
         function formatHourLabel(h) {
@@ -818,6 +962,7 @@
                 params.set('max_lon', activeBbox.maxLon.toFixed(6));
                 params.set('max_lat', activeBbox.maxLat.toFixed(6));
             }
+            appendClusterParams(params);
             var url = API_BASE + '/api/clusters?' + params.toString();
 
             showStatusMessage('Yükleniyor...', false);
@@ -854,11 +999,122 @@
                     );
                     updateSummaryCards(null);
                 });
+
+            // Keep the geohash cell layer (if enabled) in sync with the same
+            // date/hour/params/scope. Independent request; a failure here never
+            // affects the cluster markers.
+            refreshGeohashLayer();
         }
 
         // Refetch using the active scope; keep framing in region modes.
         function refetchCurrentScope() {
             fetchTemporalClusters({ fitToClusters: regionMode === 'all' });
+        }
+
+        // ── Geohash measurement-cell layer ───────────────────────────
+
+        function clearGeohashLayer() {
+            if (geohashLayer) {
+                map.removeLayer(geohashLayer);
+                geohashLayer = null;
+            }
+        }
+
+        function buildGeohashPopup(props) {
+            return '<div>' +
+                '<div class="popup-row"><span class="popup-label">Ölçüm hücresi:</span><span class="popup-value">' + escapeHtml(props.geohash) + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Ortalama Hız:</span><span class="popup-value">' + props.avg_speed_kmh.toFixed(1) + ' km/h</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Min / Maks Hız:</span><span class="popup-value">' + props.min_speed_kmh.toFixed(1) + ' / ' + props.max_speed_kmh.toFixed(1) + ' km/h</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Araç Hacmi:</span><span class="popup-value">' + props.sum_vehicle_count.toLocaleString('tr-TR') + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Ölçüm Sayısı:</span><span class="popup-value">' + props.measurement_count + '</span></div>' +
+                '<div style="margin-top:8px;font-size:12px;color:#666;line-height:1.45;">' +
+                    'Bu poligon, seçilen pencerede gerçek İBB ölçüm hücresinin (geohash kafesi) kapsadığı alandır; DBSCAN küme merkezi değildir.' +
+                '</div>' +
+                '</div>';
+        }
+
+        function renderGeohashCells(data) {
+            clearGeohashLayer();
+            if (!data || !data.features || data.features.length === 0) {
+                geohashInfo.textContent = '0 hücre';
+                return;
+            }
+            geohashLayer = L.geoJSON(data, {
+                pane: 'geohashPane',
+                style: function (feature) { return geohashCellStyle(feature.properties); },
+                onEachFeature: function (feature, layer) {
+                    layer.bindPopup(buildGeohashPopup(feature.properties));
+                }
+            }).addTo(map);
+            geohashInfo.textContent = data.truncated
+                ? (data.cell_count + '+ hücre')
+                : (data.cell_count + ' hücre');
+        }
+
+        function buildGeohashUrl() {
+            var params = new URLSearchParams({
+                date: getSelectedDate(),
+                hour: getSelectedHour()
+            });
+            // Only the window + speed filter (and region) shape the cells; eps and
+            // minpoints are clustering-only and do not apply to this layer.
+            if (getSpeedThreshold() !== DEFAULT_PARAMS.speed) {
+                params.set('avg_speed_threshold', getSpeedThreshold());
+            }
+            if (getWindowHours() !== DEFAULT_PARAMS.windowHours) {
+                params.set('window_hours', getWindowHours());
+            }
+            if (activeDistrict) {
+                params.set('district', activeDistrict);
+            } else if (activeBbox) {
+                params.set('min_lon', activeBbox.minLon.toFixed(6));
+                params.set('min_lat', activeBbox.minLat.toFixed(6));
+                params.set('max_lon', activeBbox.maxLon.toFixed(6));
+                params.set('max_lat', activeBbox.maxLat.toFixed(6));
+            }
+            return API_BASE + '/api/geohash-cells?' + params.toString();
+        }
+
+        // Fetch + draw geohash cells for the current scope when the layer is on.
+        // Triggered by the same explicit actions as the cluster fetch (never on
+        // map move), so it cannot create request loops.
+        function refreshGeohashLayer() {
+            if (!toggleGeohash.checked) {
+                clearGeohashLayer();
+                geohashInfo.textContent = '';
+                return;
+            }
+            if (!getSelectedDate()) return;
+
+            if (geohashAbortController) {
+                geohashAbortController.abort();
+            }
+            geohashAbortController = new AbortController();
+            geohashInfo.textContent = 'yükleniyor...';
+
+            fetch(buildGeohashUrl(), { signal: geohashAbortController.signal })
+                .then(function (response) {
+                    if (response.status === 503) {
+                        throw { __districtNotImported: true };
+                    }
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+                    renderGeohashCells(data);
+                })
+                .catch(function (err) {
+                    if (err && err.name === 'AbortError') return;
+                    clearGeohashLayer();
+                    if (err && err.__districtNotImported) {
+                        geohashInfo.textContent = 'ilçe sınırı yok';
+                        return;
+                    }
+                    console.error('Geohash layer error:', err);
+                    geohashInfo.textContent = 'hata';
+                });
         }
 
         // ── Region mode transitions ──────────────────────────────────
@@ -1054,8 +1310,35 @@
             }
         });
 
+        // Clustering-parameter sliders: update the label immediately, then
+        // debounce a refetch (same pattern as the hour slider — no request loop).
+        function onParamInput() {
+            updateParamLabels();
+            clearTimeout(sliderDebounceTimer);
+            sliderDebounceTimer = setTimeout(refetchCurrentScope, 300);
+        }
+        speedThreshold.addEventListener('input', onParamInput);
+        epsMeters.addEventListener('input', onParamInput);
+        minPoints.addEventListener('input', onParamInput);
+        windowHours.addEventListener('input', onParamInput);
+
+        btnResetParams.addEventListener('click', function () {
+            speedThreshold.value = DEFAULT_PARAMS.speed;
+            epsMeters.value = DEFAULT_PARAMS.eps;
+            minPoints.value = DEFAULT_PARAMS.minpts;
+            windowHours.value = DEFAULT_PARAMS.windowHours;
+            updateParamLabels();
+            refetchCurrentScope();
+        });
+
+        // Toggling the geohash layer is an explicit user action → fetch once.
+        toggleGeohash.addEventListener('change', function () {
+            refreshGeohashLayer();
+        });
+
         // ── Initial Load ─────────────────────────────────────────────
         updateHourLabel();
+        updateParamLabels();
         enterAllMode(false, false);  // set scope/buttons without resetting view
         fetchTemporalClusters();     // initial fetch fits to clusters
 
