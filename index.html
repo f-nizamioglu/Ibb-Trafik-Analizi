@@ -39,10 +39,10 @@
         .controls {
             background: #fff;
             border-bottom: 1px solid #ddd;
-            padding: 12px 24px;
+            padding: 8px 24px;
             display: flex;
             align-items: center;
-            gap: 20px;
+            gap: 8px 16px;
             flex-wrap: wrap;
         }
         .control-group {
@@ -66,8 +66,20 @@
             color: #222;
         }
         .control-group input[type="range"] {
-            width: 160px;
+            width: 136px;
             cursor: pointer;
+        }
+        .control-section-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #222;
+            margin-right: 2px;
+            white-space: nowrap;
+        }
+        .control-hint {
+            font-size: 11.5px;
+            color: #777;
+            white-space: nowrap;
         }
         .hour-label {
             font-size: 13px;
@@ -124,7 +136,7 @@
             background: #d8e6f8;
         }
 
-        /* ── Clustering Parameter Controls + Layer Toggle ────────────── */
+        /* ── Clustering Parameter Controls ──────────────────────────── */
         .param-controls {
             background: #f4f6f8;
         }
@@ -133,13 +145,21 @@
             color: #333;
         }
         .param-controls input[type="range"] {
-            width: 118px;
+            width: 104px;
         }
         .param-value {
             font-size: 12.5px;
             color: #222;
-            min-width: 58px;
+            min-width: 48px;
             font-variant-numeric: tabular-nums;
+        }
+        .param-controls .param-value {
+            font-weight: 600;
+        }
+
+        /* ── Map Layer Toggles ──────────────────────────────────────── */
+        .layer-controls {
+            background: #fff;
         }
         .param-toggle {
             display: flex;
@@ -154,7 +174,7 @@
         .param-info {
             font-size: 12px;
             color: #777;
-            min-width: 96px;
+            min-width: 76px;
             font-variant-numeric: tabular-nums;
         }
 
@@ -162,13 +182,13 @@
         .region-panel {
             background: #eef3fb;
             border-bottom: 1px solid #d6e0ef;
-            padding: 8px 24px;
+            padding: 7px 24px;
             font-size: 12.5px;
             color: #333;
         }
         .region-panel-main {
             display: flex;
-            gap: 22px;
+            gap: 8px 18px;
             flex-wrap: wrap;
             align-items: center;
         }
@@ -181,8 +201,12 @@
             font-size: 11.5px;
             color: #2a4d75;
         }
+        .region-param-summary {
+            font-variant-numeric: tabular-nums;
+        }
         .region-panel-note {
-            margin-top: 3px;
+            display: none;
+            margin-top: 2px;
             font-size: 11.5px;
             color: #777;
         }
@@ -228,8 +252,8 @@
             padding: 0 24px 12px 24px;
         }
         #map {
-            height: calc(100vh - 360px);
-            min-height: 400px;
+            height: calc(100vh - 330px);
+            min-height: 380px;
             width: 100%;
             border: 1px solid #ddd;
             border-radius: 6px;
@@ -322,7 +346,7 @@
         <p>Tarih, saat ve bölge seçimine göre trafik kümelenmesi</p>
     </div>
 
-    <!-- Controls -->
+    <!-- Section A: Main query controls -->
     <div class="controls">
         <div class="control-group">
             <label for="datePicker">Tarih:</label>
@@ -345,7 +369,7 @@
         <button class="btn-refresh" id="btnRefresh">Yenile</button>
     </div>
 
-    <!-- Region Analysis Controls -->
+    <!-- Section B: Region controls -->
     <div class="controls region-controls">
         <div class="control-group">
             <label>Bölge Analizi:</label>
@@ -353,6 +377,7 @@
             <button class="btn-mode" id="btnModeMapView" data-mode="mapview">Harita Görünümü</button>
             <button class="btn-mode" id="btnModeRect" data-mode="rectangle">Dikdörtgen Seç</button>
             <button class="btn-refresh btn-analyze" id="btnAnalyzeRect" style="display:none;">Seçili Alanı Analiz Et</button>
+            <span class="control-hint" id="regionModeHint">Mekansal filtre yok.</span>
         </div>
         <div class="control-group">
             <label for="districtSelect">İlçe:</label>
@@ -369,40 +394,51 @@
                 <option value="pendik">Pendik</option>
                 <option value="sariyer">Sarıyer</option>
             </select>
+            <span class="control-hint">İlçe poligonu DBSCAN'den önce uygulanır.</span>
         </div>
     </div>
 
-    <!-- Clustering Parameters + Measurement-Cell Layer -->
+    <!-- Section C: Clustering parameters -->
     <div class="controls param-controls">
+        <span class="control-section-title">Kümeleme Parametreleri</span>
         <div class="control-group">
-            <label>Kümeleme Parametreleri:</label>
-        </div>
-        <div class="control-group">
-            <label for="speedThreshold">Hız eşiği:</label>
+            <label for="speedThreshold">Hız &lt;</label>
             <input type="range" id="speedThreshold" min="5" max="60" step="1" value="25">
-            <span class="param-value" id="speedThresholdLabel">&lt; 25 km/h</span>
+            <span class="param-value" id="speedThresholdLabel">25 km/h</span>
         </div>
         <div class="control-group">
-            <label for="epsMeters">DBSCAN eps:</label>
+            <label for="epsMeters">eps</label>
             <input type="range" id="epsMeters" min="100" max="3000" step="100" value="1000">
             <span class="param-value" id="epsMetersLabel">1000 m</span>
         </div>
         <div class="control-group">
-            <label for="minPoints">Min. nokta:</label>
+            <label for="minPoints">minPts</label>
             <input type="range" id="minPoints" min="1" max="10" step="1" value="2">
             <span class="param-value" id="minPointsLabel">2</span>
         </div>
         <div class="control-group">
-            <label for="windowHours">Zaman penceresi:</label>
+            <label for="windowHours">Pencere</label>
             <input type="range" id="windowHours" min="1" max="6" step="1" value="1">
             <span class="param-value" id="windowHoursLabel">1 saat</span>
         </div>
         <button class="btn-refresh" id="btnResetParams" title="Parametreleri varsayılana döndür">Sıfırla</button>
+    </div>
+
+    <!-- Section D: Map layers -->
+    <div class="controls layer-controls">
+        <span class="control-section-title">Harita Katmanları</span>
         <div class="control-group">
             <label class="param-toggle" for="toggleGeohash">
-                <input type="checkbox" id="toggleGeohash"> Ölçüm hücreleri (geohash)
+                <input type="checkbox" id="toggleGeohash"> Ölçüm hücreleri
             </label>
             <span class="param-info" id="geohashInfo"></span>
+        </div>
+        <div class="control-group">
+            <label class="param-toggle" for="toggleRoads">
+                <input type="checkbox" id="toggleRoads"> Ana yol çizgileri
+            </label>
+            <span class="control-hint">Dar alanlarda önerilir</span>
+            <span class="param-info" id="roadInfo"></span>
         </div>
     </div>
 
@@ -410,10 +446,11 @@
     <div class="region-panel" id="regionPanel">
         <div class="region-panel-main">
             <span><span class="region-panel-label">Kapsam:</span> <span id="regionScopeText">Tüm İstanbul</span></span>
-            <span><span class="region-panel-label">Sorgu türü:</span> <span id="regionQueryType">Tarih/saat + tüm alan</span></span>
+            <span><span class="region-panel-label">Sorgu:</span> <span id="regionQueryType">tarih/saat + tüm alan</span></span>
+            <span><span class="region-panel-label">Parametreler:</span> <span class="region-param-summary" id="regionParamSummary">hız&lt;25, eps=1000m, minPts=2, pencere=1 saat</span></span>
             <span id="regionBboxItem" style="display:none;"><span class="region-panel-label">Alan:</span> <span class="region-panel-bbox" id="regionBboxText">-</span></span>
         </div>
-        <div class="region-panel-note" id="regionPanelNote">Gösterilen metrikler tüm İstanbul kapsamı için hesaplanmıştır.</div>
+        <div class="region-panel-note" id="regionPanelNote"></div>
     </div>
 
     <!-- Summary Cards -->
@@ -427,7 +464,7 @@
             <div class="card-value" id="cardAvgSpeed">-</div>
         </div>
         <div class="card">
-            <div class="card-label">Saatlik Araç Hacmi</div>
+            <div class="card-label" id="vehicleVolumeLabel">Saatlik Araç Hacmi</div>
             <div class="card-value" id="cardTotalVehicles">-</div>
         </div>
         <div class="card">
@@ -443,7 +480,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Veri aralığı: 2020-01-01 / 2025-01-31<br><span style="opacity: 0.8; font-size: 11px; margin-top: 5px; display: inline-block;">Renkler; hız düşüşü, saatlik araç hacmi ve küme büyüklüğü birlikte değerlendirilerek hesaplanan trafik yoğunluk skorunu gösterir. İşaretçiler DBSCAN küme merkezidir; gerçek araç, sensör veya yol noktası değildir. İlçe seçiminde gerçek ilçe poligonu veritabanından okunur ve haritada sınır çizgisi olarak gösterilir; Harita Görünümü ve Dikdörtgen Seç modları dikdörtgen bbox alan kullanır.</span>
+        Veri aralığı: 2020-01-01 / 2025-01-31 · Daireler DBSCAN küme merkezidir.
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -537,6 +574,17 @@
             };
         }
 
+        function roadLineStyle(feature) {
+            var highway = feature && feature.properties ? feature.properties.highway : '';
+            var isHighCapacity = highway === 'motorway' || highway === 'trunk';
+            return {
+                color: isHighCapacity ? '#0d47a1' : '#1976d2',
+                weight: isHighCapacity ? 3 : 2,
+                opacity: isHighCapacity ? 0.78 : 0.62,
+                interactive: false
+            };
+        }
+
         // ── DOM Elements ─────────────────────────────────────────────
         var datePicker     = document.getElementById('datePicker');
         var hourSlider     = document.getElementById('hourSlider');
@@ -550,11 +598,14 @@
         var districtSelect = document.getElementById('districtSelect');
         var regionScopeText = document.getElementById('regionScopeText');
         var regionQueryType = document.getElementById('regionQueryType');
+        var regionParamSummary = document.getElementById('regionParamSummary');
         var regionBboxItem  = document.getElementById('regionBboxItem');
         var regionBboxText  = document.getElementById('regionBboxText');
         var regionPanelNote = document.getElementById('regionPanelNote');
+        var regionModeHint = document.getElementById('regionModeHint');
         var cardClusterCount  = document.getElementById('cardClusterCount');
         var cardAvgSpeed      = document.getElementById('cardAvgSpeed');
+        var cardVehicleVolumeLabel = document.getElementById('vehicleVolumeLabel');
         var cardTotalVehicles = document.getElementById('cardTotalVehicles');
         var cardHighCount     = document.getElementById('cardHighCount');
         var speedThreshold      = document.getElementById('speedThreshold');
@@ -568,6 +619,8 @@
         var btnResetParams      = document.getElementById('btnResetParams');
         var toggleGeohash       = document.getElementById('toggleGeohash');
         var geohashInfo         = document.getElementById('geohashInfo');
+        var toggleRoads         = document.getElementById('toggleRoads');
+        var roadInfo            = document.getElementById('roadInfo');
 
         // ── Map Setup ────────────────────────────────────────────────
         var map = L.map('map').setView(ISTANBUL_CENTER, DEFAULT_ZOOM);
@@ -584,6 +637,12 @@
         map.getPane('geohashPane').style.zIndex = 350;
         var geohashLayer = null;
         var geohashAbortController = null;
+
+        map.createPane('roadPane');
+        map.getPane('roadPane').style.zIndex = 390;
+        map.getPane('roadPane').style.pointerEvents = 'none';
+        var roadLayer = null;
+        var roadAbortController = null;
 
         // ── Region state ─────────────────────────────────────────────
         // regionMode: 'all' | 'mapview' | 'rectangle' | 'district'
@@ -611,8 +670,9 @@
                 '<div class="legend-item"><span class="legend-color" style="background:#f57c00"></span> Orta Yoğunluk</div>' +
                 '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> Düşük Yoğunluk</div>' +
                 '<div class="legend-sep"></div>' +
-                '<div class="legend-item"><span class="legend-color square" style="background:#e53935;opacity:0.55"></span> Ölçüm hücresi (geohash)</div>' +
-                '<div class="legend-note">Hücre yavaşladıkça kırmızıya yaklaşır</div>';
+                '<div class="legend-item"><span class="legend-color square" style="background:#e53935;opacity:0.55"></span> Ölçüm hücresi</div>' +
+                '<div class="legend-item"><span class="legend-color" style="background:#0d47a1;height:3px;border-radius:0"></span> Ana yol koridoru</div>' +
+                '<div class="legend-note">Daireler DBSCAN küme merkezidir.</div>';
             return div;
         };
         legend.addTo(map);
@@ -637,10 +697,21 @@
         function getWindowHours()    { return parseInt(windowHours.value, 10); }
 
         function updateParamLabels() {
-            speedThresholdLabel.textContent = '< ' + getSpeedThreshold() + ' km/h';
+            speedThresholdLabel.textContent = getSpeedThreshold() + ' km/h';
             epsMetersLabel.textContent = getEpsMeters() + ' m';
             minPointsLabel.textContent = getMinPoints();
             windowHoursLabel.textContent = getWindowHours() + ' saat';
+            updateRegionParamSummary();
+            updateHourLabel();
+        }
+
+        function updateRegionParamSummary() {
+            if (!regionParamSummary) return;
+            regionParamSummary.textContent =
+                'hız<' + getSpeedThreshold() +
+                ', eps=' + getEpsMeters() + 'm' +
+                ', minPts=' + getMinPoints() +
+                ', pencere=' + getWindowHours() + ' saat';
         }
 
         // Append only the non-default clustering params to a URLSearchParams.
@@ -659,13 +730,31 @@
             }
         }
 
-        function formatHourLabel(h) {
-            var hh = h.toString().padStart(2, '0');
-            return hh + ':00 - ' + hh + ':59';
+        function twoDigitHour(h) {
+            return h.toString().padStart(2, '0');
+        }
+
+        function formatHourLabel(hour, windowLength) {
+            var safeHour = parseInt(hour, 10);
+            var safeWindow = parseInt(windowLength, 10) || 1;
+            var startHour = ((safeHour % 24) + 24) % 24;
+            var endTotal = safeHour + safeWindow;
+            var endHour = ((endTotal % 24) + 24) % 24;
+            var dayOffset = Math.floor(endTotal / 24);
+            var label = twoDigitHour(startHour) + ':00 - ' + twoDigitHour(endHour) + ':00';
+            if (safeWindow > 1 && dayOffset > 0) {
+                label += ' (+' + dayOffset + ' gün)';
+            } else if (safeWindow > 1) {
+                label += ' (' + safeWindow + ' saatlik pencere';
+                label += ')';
+            } else if (dayOffset > 0) {
+                label += ' (+' + dayOffset + ' gün)';
+            }
+            return label;
         }
 
         function updateHourLabel() {
-            hourLabel.textContent = formatHourLabel(getSelectedHour());
+            hourLabel.textContent = formatHourLabel(getSelectedHour(), getWindowHours());
         }
 
         function escapeHtml(str) {
@@ -765,12 +854,25 @@
 
         function setRegionScope(scopeLabel, bbox, district) {
             regionScopeText.textContent = scopeLabel;
+            updateRegionParamSummary();
             if (district) {
-                regionQueryType.textContent = 'Tarih/saat + ilçe poligonu';
+                regionQueryType.textContent = 'tarih/saat + ilçe poligonu';
+                regionModeHint.textContent = 'İlçe poligonu DBSCAN\'den önce uygulanır.';
+            } else if (bbox && regionMode === 'mapview') {
+                regionQueryType.textContent = 'tarih/saat + görünür bbox';
+                regionModeHint.textContent = 'Ekrandaki harita sınırları analiz edilir.';
+            } else if (bbox && regionMode === 'rectangle') {
+                regionQueryType.textContent = 'tarih/saat + seçili bbox';
+                regionModeHint.textContent = 'Çizilen alan DBSCAN\'den önce filtrelenir.';
             } else if (bbox) {
-                regionQueryType.textContent = 'Tarih/saat + bbox';
+                regionQueryType.textContent = 'tarih/saat + bbox';
+                regionModeHint.textContent = 'Seçili alan analiz edilir.';
+            } else if (regionMode === 'rectangle') {
+                regionQueryType.textContent = 'tarih/saat + seçili bbox';
+                regionModeHint.textContent = 'Çizilen alan DBSCAN\'den önce filtrelenir.';
             } else {
-                regionQueryType.textContent = 'Tarih/saat + tüm alan';
+                regionQueryType.textContent = 'tarih/saat + tüm alan';
+                regionModeHint.textContent = 'Mekansal filtre yok.';
             }
             if (bbox) {
                 regionBboxText.textContent =
@@ -783,27 +885,26 @@
                 regionBboxText.textContent = '-';
                 regionBboxItem.style.display = 'none';
             }
-            // Region filtering (bbox or district) recalculates DBSCAN on the subset.
             if (district) {
-                setRegionNote(
-                    'Gösterilen metrikler seçili kapsam için hesaplanmıştır.',
-                    'İlçe sınırı haritada çizgiyle gösterilir; kümeler bu poligon ' +
-                    'içindeki ölçümlerle yeniden hesaplanır.'
-                );
-            } else if (bbox) {
-                setRegionNote(
-                    'Gösterilen metrikler seçili kapsam için hesaplanmıştır.',
-                    'Not: Bölge seçildiğinde kümeleme seçilen alan içindeki ölçümler ' +
-                    'için yeniden hesaplanır; bu nedenle Tüm İstanbul görünümündeki ' +
-                    'marker konumlarıyla birebir aynı olmayabilir.'
-                );
+                setRegionNote('', null);
+            } else if (bbox && regionMode === 'mapview') {
+                setRegionNote('', null);
+            } else if (bbox && regionMode === 'rectangle') {
+                setRegionNote('Seçili alan hazır; analiz etmek için düğmeye basın.', null);
+            } else if (regionMode === 'rectangle') {
+                setRegionNote('Haritada sürükleyip alan çizin.', null);
             } else {
-                setRegionNote('Gösterilen metrikler tüm İstanbul kapsamı için hesaplanmıştır.', null);
+                setRegionNote('', null);
             }
         }
 
         function setRegionNote(mainText, subText) {
             regionPanelNote.textContent = mainText;
+            if (!mainText && !subText) {
+                regionPanelNote.style.display = 'none';
+                return;
+            }
+            regionPanelNote.style.display = 'block';
             if (subText) {
                 var span = document.createElement('span');
                 span.className = 'region-panel-recalc';
@@ -813,6 +914,7 @@
         }
 
         function appendRegionWarning(text) {
+            regionPanelNote.style.display = 'block';
             var span = document.createElement('span');
             span.className = 'region-panel-recalc region-panel-warn';
             span.textContent = text;
@@ -820,6 +922,10 @@
         }
 
         function updateSummaryCards(data) {
+            var activeWindow = data && data.window_hours ? data.window_hours : getWindowHours();
+            cardVehicleVolumeLabel.textContent = activeWindow > 1
+                ? activeWindow + ' Saatlik Araç Hacmi'
+                : 'Saatlik Araç Hacmi';
             if (!data || data.cluster_count === 0) {
                 cardClusterCount.textContent = '0';
                 cardAvgSpeed.textContent = '-';
@@ -862,8 +968,9 @@
 
         // ── Build popup content ──────────────────────────────────────
 
-        function buildPopupContent(props, selectedDate, selectedHour) {
-            var hourStr = selectedHour.toString().padStart(2, '0');
+        function buildPopupContent(props, selectedDate, selectedHour, selectedWindowHours) {
+            var timeRange = formatHourLabel(selectedHour, selectedWindowHours);
+            var volumeLabel = selectedWindowHours > 1 ? 'Pencere Araç Hacmi:' : 'Saatlik Araç Hacmi:';
             var severity = SEVERITY_LABELS[props.severity] || props.severity;
             var minSpeedRow = '';
             if (props.min_speed_kmh !== undefined && props.min_speed_kmh !== null) {
@@ -877,10 +984,10 @@
                     (props.congestion_score != null ? props.congestion_score.toFixed(1) : '-') + '/100</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Yoğunluk Düzeyi:</span><span class="popup-value">' + escapeHtml(severity) + '</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Tarih:</span><span class="popup-value">' + escapeHtml(selectedDate) + '</span></div>' +
-                '<div class="popup-row"><span class="popup-label">Saat:</span><span class="popup-value">' + hourStr + ':00 - ' + hourStr + ':59</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Saat:</span><span class="popup-value">' + escapeHtml(timeRange) + '</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Küme Ortalama Hızı:</span><span class="popup-value">' + props.avg_speed_kmh.toFixed(1) + ' km/h</span></div>' +
                 minSpeedRow +
-                '<div class="popup-row"><span class="popup-label">Saatlik Araç Hacmi:</span><span class="popup-value">' + props.sum_vehicle_count.toLocaleString('tr-TR') + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">' + volumeLabel + '</span><span class="popup-value">' + props.sum_vehicle_count.toLocaleString('tr-TR') + '</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Hücre Sayısı:</span><span class="popup-value">' + props.point_count + '</span></div>' +
                 '<div style="margin-top:8px;font-size:12px;color:#666;line-height:1.45;">' +
                     'İşaretçi, DBSCAN kümesinin merkezini gösterir; gerçek araç, sensör veya yol noktası değildir.' +
@@ -895,6 +1002,10 @@
             clearMapLayer();
             clearStatusMessage();
 
+            if (data && data.hour !== undefined) {
+                hourLabel.textContent = formatHourLabel(data.hour, data.window_hours || getWindowHours());
+            }
+
             if (!data || !data.features || data.features.length === 0) {
                 showStatusMessage('Seçilen kapsam için trafik kümesi bulunamadı.', false);
                 updateSummaryCards(data);
@@ -905,13 +1016,20 @@
 
             var selectedDate = data.date;
             var selectedHour = data.hour;
+            var selectedWindowHours = data.window_hours || getWindowHours();
+            hourLabel.textContent = formatHourLabel(selectedHour, selectedWindowHours);
 
             clusterLayer = L.geoJSON(data, {
                 pointToLayer: function (feature, latlng) {
                     return L.circleMarker(latlng, markerStyle(feature.properties));
                 },
                 onEachFeature: function (feature, layer) {
-                    var html = buildPopupContent(feature.properties, selectedDate, selectedHour);
+                    var html = buildPopupContent(
+                        feature.properties,
+                        selectedDate,
+                        selectedHour,
+                        selectedWindowHours
+                    );
                     layer.bindPopup(html);
                 }
             }).addTo(map);
@@ -1004,6 +1122,7 @@
             // date/hour/params/scope. Independent request; a failure here never
             // affects the cluster markers.
             refreshGeohashLayer();
+            refreshRoadLayer();
         }
 
         // Refetch using the active scope; keep framing in region modes.
@@ -1117,6 +1236,108 @@
                 });
         }
 
+        // Road lines clipped to congested geohash cells. This layer is off by
+        // default and requires an explicit bbox/district scope to avoid heavy
+        // full-city geometry requests.
+
+        function clearRoadLayer() {
+            if (roadLayer) {
+                map.removeLayer(roadLayer);
+                roadLayer = null;
+            }
+        }
+
+        function renderRoadLines(data) {
+            clearRoadLayer();
+            var isCorridorSummary = data
+                && data.effective_parameters
+                && data.effective_parameters.road_filter === 'corridor_summary';
+            var unitLabel = isCorridorSummary ? 'koridor' : 'yol';
+            if (!data || !data.features || data.features.length === 0) {
+                roadInfo.textContent = '0 ' + unitLabel;
+                return;
+            }
+            roadLayer = L.geoJSON(data, {
+                pane: 'roadPane',
+                style: roadLineStyle,
+                interactive: false
+            }).addTo(map);
+            roadInfo.textContent = data.truncated
+                ? (data.road_count + '+ ' + unitLabel)
+                : (data.road_count + ' ' + unitLabel);
+        }
+
+        function buildRoadUrl() {
+            if (!activeDistrict && !activeBbox) {
+                return null;
+            }
+            var params = new URLSearchParams({
+                date: getSelectedDate(),
+                hour: getSelectedHour()
+            });
+            if (getSpeedThreshold() !== DEFAULT_PARAMS.speed) {
+                params.set('avg_speed_threshold', getSpeedThreshold());
+            }
+            if (getWindowHours() !== DEFAULT_PARAMS.windowHours) {
+                params.set('window_hours', getWindowHours());
+            }
+            if (activeDistrict) {
+                params.set('district', activeDistrict);
+            } else {
+                params.set('min_lon', activeBbox.minLon.toFixed(6));
+                params.set('min_lat', activeBbox.minLat.toFixed(6));
+                params.set('max_lon', activeBbox.maxLon.toFixed(6));
+                params.set('max_lat', activeBbox.maxLat.toFixed(6));
+            }
+            return API_BASE + '/api/congested-roads?' + params.toString();
+        }
+
+        function refreshRoadLayer() {
+            if (!toggleRoads.checked) {
+                clearRoadLayer();
+                roadInfo.textContent = '';
+                return;
+            }
+            if (!getSelectedDate()) return;
+
+            var url = buildRoadUrl();
+            if (!url) {
+                clearRoadLayer();
+                roadInfo.textContent = 'bbox veya ilçe seçiniz';
+                return;
+            }
+
+            if (roadAbortController) {
+                roadAbortController.abort();
+            }
+            roadAbortController = new AbortController();
+            roadInfo.textContent = 'yükleniyor...';
+
+            fetch(url, { signal: roadAbortController.signal })
+                .then(function (response) {
+                    if (response.status === 503) {
+                        throw { __roadUnavailable: true };
+                    }
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+                    renderRoadLines(data);
+                })
+                .catch(function (err) {
+                    if (err && err.name === 'AbortError') return;
+                    clearRoadLayer();
+                    if (err && err.__roadUnavailable) {
+                        roadInfo.textContent = 'yol verisi yok';
+                        return;
+                    }
+                    console.error('Road layer error:', err);
+                    roadInfo.textContent = 'hata';
+                });
+        }
+
         // ── Region mode transitions ──────────────────────────────────
 
         function resetDrawingInteraction() {
@@ -1170,6 +1391,10 @@
             activeDistrict = null;
             clearRectangleOverlay();
             clearDistrictOverlay();
+            clearRoadLayer();
+            if (toggleRoads.checked) {
+                roadInfo.textContent = 'bbox veya ilçe seçiniz';
+            }
             districtSelect.value = '';
             btnAnalyzeRect.style.display = 'none';
             setActiveModeButton('rectangle');
@@ -1177,7 +1402,7 @@
             drawStartLatLng = null;
             map.dragging.disable();
             L.DomUtil.addClass(map.getContainer(), 'map-drawing');
-            setRegionScope('Dikdörtgen çizmek için haritada sürükleyin', null, null);
+            setRegionScope('Dikdörtgen Seç', null, null);
         }
 
         function finishRectangleDraw(bounds) {
@@ -1190,7 +1415,7 @@
                 clearRectangleOverlay();
                 activeBbox = null;
                 btnAnalyzeRect.style.display = 'none';
-                setRegionScope('Geçerli bir dikdörtgen çizilmedi — "Dikdörtgen Seç" ile tekrar deneyin', null);
+                setRegionScope('Geçerli alan yok - tekrar çizin', null);
                 return;
             }
 
@@ -1201,7 +1426,7 @@
             }
             activeBbox = boundsToBbox(bounds);
             rectangleLayer = L.rectangle(bboxToBounds(activeBbox), RECT_STYLE).addTo(map);
-            setRegionScope('Seçili dikdörtgen alan', activeBbox);
+            setRegionScope('Çizilen alan', activeBbox);
             btnAnalyzeRect.style.display = '';
             // Intentionally do NOT fetch here — user clicks "Seçili Alanı Analiz Et".
         }
@@ -1334,6 +1559,10 @@
         // Toggling the geohash layer is an explicit user action → fetch once.
         toggleGeohash.addEventListener('change', function () {
             refreshGeohashLayer();
+        });
+
+        toggleRoads.addEventListener('change', function () {
+            refreshRoadLayer();
         });
 
         // ── Initial Load ─────────────────────────────────────────────

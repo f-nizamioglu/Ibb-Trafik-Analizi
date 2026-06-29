@@ -11,12 +11,13 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.app.limiter import limiter
 from backend.app.models.cluster import (
+    CongestedRoadResponse,
     GeoJSONFeatureCollection,
     GeohashCellResponse,
     StatsResponse,
@@ -34,6 +35,10 @@ from backend.app.services.cluster_service import (
 )
 from backend.app.services.district_utils import normalize_district_key
 from backend.app.services.geohash_service import get_geohash_cells
+from backend.app.services.road_service import (
+    RoadNetworkUnavailable,
+    get_congested_roads,
+)
 
 router = APIRouter()
 
@@ -401,6 +406,147 @@ async def list_geohash_cells(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         # Includes UnknownDistrict (a ValueError subclass) → 400, matching /clusters.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/congested-roads", response_model=CongestedRoadResponse)
+@limiter.limit("30/minute")
+async def list_congested_roads(
+    request: Request,
+    date: str = Query(
+        ...,
+        description="Date (YYYY-MM-DD). Required.",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    ),
+    hour: int = Query(
+        ...,
+        description="Start hour of day (0-23). Required.",
+        ge=0,
+        le=23,
+    ),
+    avg_speed_threshold: Optional[float] = Query(
+        None,
+        description="Keep measurements with avg_speed below this (km/h). Default 25.",
+        gt=0,
+        le=120,
+    ),
+    window_hours: Optional[int] = Query(
+        None,
+        description="Number of hours in the window starting at 'hour'. Default 1.",
+        ge=1,
+        le=24,
+    ),
+    min_lon: Optional[float] = Query(
+        None,
+        description="Minimum longitude for required WGS84 bbox filter.",
+        ge=-180,
+        le=180,
+    ),
+    min_lat: Optional[float] = Query(
+        None,
+        description="Minimum latitude for required WGS84 bbox filter.",
+        ge=-90,
+        le=90,
+    ),
+    max_lon: Optional[float] = Query(
+        None,
+        description="Maximum longitude for required WGS84 bbox filter.",
+        ge=-180,
+        le=180,
+    ),
+    max_lat: Optional[float] = Query(
+        None,
+        description="Maximum latitude for required WGS84 bbox filter.",
+        ge=-90,
+        le=90,
+    ),
+    district: Optional[str] = Query(
+        None,
+        description=(
+            "Optional district key (e.g. 'besiktas') to filter by the real "
+            "district polygon. Mutually exclusive with the bbox parameters."
+        ),
+    ),
+    road_level: Literal["main", "all"] = Query(
+        "main",
+        description=(
+            "Road detail level. 'main' returns summarized traffic corridors; "
+            "'all' returns the previous capped/clipped segment behavior."
+        ),
+    ),
+):
+    """
+    Road lines clipped to the selected congested geohash measurement cells.
+
+    The endpoint requires either a bbox or a district so the road overlay cannot
+    accidentally request a full-city geometry payload. It applies the same
+    date/hour/window + avg_speed filter used by /api/geohash-cells, clips road
+    lines to the resulting congested geohash-cell area, and returns capped
+    WGS84 GeoJSON LineString/MultiLineString features. The default road level
+    summarizes recognizable corridors for presentation clarity.
+    """
+    bbox_values = (min_lon, min_lat, max_lon, max_lat)
+    bbox_flags = [value is not None for value in bbox_values]
+    if any(bbox_flags) and not all(bbox_flags):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "All bbox parameters must be provided together: "
+                "min_lon, min_lat, max_lon, max_lat."
+            ),
+        )
+
+    bbox = None
+    if all(bbox_flags):
+        if min_lon >= max_lon:
+            raise HTTPException(
+                status_code=400,
+                detail="'min_lon' must be less than 'max_lon'.",
+            )
+        if min_lat >= max_lat:
+            raise HTTPException(
+                status_code=400,
+                detail="'min_lat' must be less than 'max_lat'.",
+            )
+        bbox = (min_lon, min_lat, max_lon, max_lat)
+
+    district_key = None
+    if district is not None:
+        district_key = normalize_district_key(district)
+        if not district_key:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' must be a non-empty value.",
+            )
+        if bbox is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="'district' and bbox parameters are mutually exclusive.",
+            )
+
+    if bbox is None and district_key is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Road lines require bbox or district selection.",
+        )
+
+    tuning: dict = {}
+    if avg_speed_threshold is not None:
+        tuning["avg_speed_threshold"] = avg_speed_threshold
+    if window_hours is not None:
+        tuning["window_hours"] = window_hours
+    tuning["road_level"] = road_level
+
+    try:
+        if district_key is not None:
+            return await get_congested_roads(date, hour, district=district_key, **tuning)
+        return await get_congested_roads(date, hour, bbox=bbox, **tuning)
+    except RoadNetworkUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except DistrictBoundariesNotImported as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        # Includes UnknownDistrict (a ValueError subclass), matching /clusters.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

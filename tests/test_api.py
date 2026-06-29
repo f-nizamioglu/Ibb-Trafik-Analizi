@@ -803,6 +803,254 @@ def test_geohash_to_polygon_is_closed_ring_in_lonlat_order():
     assert ring[3] == [min_lon, max_lat]
 
 
+# ── Congested road line overlay (/api/congested-roads) ────────────────────────
+
+@pytest.fixture
+def congested_roads_client(monkeypatch):
+    """FastAPI test client with congested-road retrieval stubbed."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.app.models.cluster import (
+        CongestedRoadResponse,
+        RoadLineFeature,
+        RoadLineGeometry,
+        RoadLineProperties,
+    )
+    from backend.app.routers import clusters as clusters_router
+
+    calls = []
+
+    async def fake_get_congested_roads(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        road_level = kwargs.get("road_level", "main")
+        road_filter = "corridor_summary" if road_level == "main" else "all_segments"
+        return CongestedRoadResponse(
+            date=args[0],
+            hour=args[1],
+            window_hours=kwargs.get("window_hours", 1),
+            avg_speed_threshold=kwargs.get("avg_speed_threshold", 25.0),
+            road_count=1,
+            limit=60 if road_level == "main" else 1000,
+            truncated=False,
+            effective_parameters={
+                "scope": "test",
+                "road_level": road_level,
+                "road_filter": road_filter,
+            },
+            features=[
+                RoadLineFeature(
+                    geometry=RoadLineGeometry(
+                        type="LineString",
+                        coordinates=[[28.95, 41.02], [28.96, 41.03]],
+                    ),
+                    properties=RoadLineProperties(
+                        road_id=1,
+                        osm_id=123,
+                        highway="motorway",
+                        name="1. Çevre Yolu",
+                        clipped_length_m=42.0,
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        clusters_router,
+        "get_congested_roads",
+        fake_get_congested_roads,
+    )
+
+    app = FastAPI()
+    app.include_router(clusters_router.router, prefix="/api")
+    with TestClient(app) as client:
+        yield client, calls
+
+
+def test_congested_roads_requires_date_and_hour(congested_roads_client):
+    client, calls = congested_roads_client
+
+    assert client.get(
+        "/api/congested-roads?hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    ).status_code == 422
+    assert client.get(
+        "/api/congested-roads?date=2025-01-17"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    ).status_code == 422
+    assert calls == []
+
+
+def test_congested_roads_requires_bbox_or_district(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get("/api/congested-roads?date=2025-01-17&hour=18")
+
+    assert r.status_code == 400
+    assert "bbox or district" in r.json()["detail"]
+    assert calls == []
+
+
+def test_congested_roads_accepts_bbox_and_returns_geojson(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+        "&avg_speed_threshold=20&window_hours=2"
+    )
+
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "FeatureCollection"
+    assert data["road_count"] == 1
+    assert data["limit"] == 60
+    assert data["truncated"] is False
+    assert data["effective_parameters"]["road_level"] == "main"
+    assert data["effective_parameters"]["road_filter"] == "corridor_summary"
+    feature = data["features"][0]
+    assert feature["geometry"]["type"] == "LineString"
+    assert feature["geometry"]["coordinates"][0] == [28.95, 41.02]
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {
+                "bbox": (28.95, 41.02, 29.08, 41.10),
+                "avg_speed_threshold": 20.0,
+                "window_hours": 2,
+                "road_level": "main",
+            },
+        }
+    ]
+
+
+def test_congested_roads_district_and_bbox_mutually_exclusive(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18&district=besiktas"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 400
+    assert "mutually exclusive" in r.json()["detail"]
+    assert calls == []
+
+
+def test_congested_roads_accepts_and_normalizes_district(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get("/api/congested-roads?date=2025-01-17&hour=18&district=BESIKTAS")
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {"district": "besiktas", "road_level": "main"},
+        }
+    ]
+
+
+def test_congested_roads_accepts_all_road_level(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+        "&road_level=all"
+    )
+
+    assert r.status_code == 200
+    assert calls[0]["kwargs"]["road_level"] == "all"
+    assert r.json()["effective_parameters"]["road_level"] == "all"
+    assert r.json()["effective_parameters"]["road_filter"] == "all_segments"
+    assert r.json()["limit"] == 1000
+
+
+def test_congested_roads_rejects_invalid_road_level(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+        "&road_level=residential"
+    )
+
+    assert r.status_code == 422
+    assert calls == []
+
+
+def test_congested_roads_unavailable_returns_503(congested_roads_client, monkeypatch):
+    client, _ = congested_roads_client
+
+    from backend.app.routers import clusters as clusters_router
+    from backend.app.services.road_service import RoadNetworkUnavailable
+
+    async def raise_unavailable(*args, **kwargs):
+        raise RoadNetworkUnavailable("Road network LineString data is not imported.")
+
+    monkeypatch.setattr(clusters_router, "get_congested_roads", raise_unavailable)
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 503
+    assert "road network" in r.json()["detail"].lower()
+
+
+def test_congested_roads_service_has_output_cap():
+    from backend.app.services.road_service import _CORRIDOR_ROAD_LIMIT, _ROAD_LIMIT
+
+    assert 0 < _ROAD_LIMIT <= 1000
+    assert 0 < _CORRIDOR_ROAD_LIMIT <= 60
+
+
+def test_congested_roads_main_level_is_corridor_only():
+    from backend.app.services.road_service import (
+        _CORRIDOR_BASE_HIGHWAYS,
+        _CORRIDOR_NAME_HIGHWAYS,
+        _MAIN_ROAD_HIGHWAYS,
+        _matches_corridor_name,
+    )
+
+    assert set(_CORRIDOR_BASE_HIGHWAYS) == {"motorway", "trunk"}
+    assert {
+        "primary",
+        "motorway_link",
+        "trunk_link",
+        "primary_link",
+        "secondary_link",
+    } == set(_CORRIDOR_NAME_HIGHWAYS)
+    assert set(_MAIN_ROAD_HIGHWAYS) == (
+        set(_CORRIDOR_BASE_HIGHWAYS) | set(_CORRIDOR_NAME_HIGHWAYS)
+    )
+    assert not {
+        "secondary",
+        "tertiary",
+        "tertiary_link",
+        "residential",
+        "living_street",
+        "service",
+        "footway",
+        "path",
+        "track",
+        "pedestrian",
+        "cycleway",
+        "construction",
+        "unclassified",
+    }.intersection(_MAIN_ROAD_HIGHWAYS)
+    assert _matches_corridor_name("D100 Karayolu")
+    assert _matches_corridor_name("D-100 Güney Yanyolu")
+    assert _matches_corridor_name("O-1-O-2 Çamlıca Bağlantısı")
+    assert _matches_corridor_name("TEM Bağlantı Yolu")
+    assert _matches_corridor_name("Avrasya Tüneli")
+    assert _matches_corridor_name("1. Çevre Yolu")
+    assert not _matches_corridor_name("Tema Caddesi")
+    assert not _matches_corridor_name("Atatürk Caddesi")
+
+
 # ── Live DB endpoint tests (skipped if no DB) ────────────────────────────────
 
 @pytest.mark.db

@@ -7,7 +7,7 @@ Swagger documentation for all API endpoints.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -218,3 +218,52 @@ class GeohashCellResponse(BaseModel):
         "lowest-volume cells were dropped.",
     )
     features: list[GeohashCellFeature]
+
+
+# Road line overlay inside congested geohash measurement cells. These are
+# optional visualization features backed by the imported road_segments table.
+
+class RoadLineGeometry(BaseModel):
+    """GeoJSON LineString or MultiLineString geometry in lon/lat order."""
+    type: str = Field(..., description="LineString or MultiLineString")
+    coordinates: list[Any] = Field(..., description="GeoJSON coordinates in lon/lat order")
+
+
+class RoadLineProperties(BaseModel):
+    """Metadata for one clipped road segment."""
+    road_id: int
+    osm_id: Optional[int] = None
+    highway: Optional[str] = None
+    name: Optional[str] = None
+    clipped_length_m: float = Field(
+        ..., description="Length of the returned clipped geometry in meters"
+    )
+
+
+class RoadLineFeature(BaseModel):
+    """A single GeoJSON Feature for a road line clipped to congested cells."""
+    type: str = "Feature"
+    geometry: RoadLineGeometry
+    properties: RoadLineProperties
+
+
+class CongestedRoadResponse(BaseModel):
+    """Road lines intersecting the selected congested geohash-cell area."""
+    type: str = "FeatureCollection"
+    date: str = Field(..., description="Requested date (YYYY-MM-DD)")
+    hour: int = Field(..., description="Requested start hour (0-23)")
+    window_hours: int = Field(1, description="Length of the time window (hours)")
+    avg_speed_threshold: float = Field(
+        25.0, description="avg_speed < threshold (km/h) pre-filter used for this query"
+    )
+    road_count: int = Field(0, description="Number of road features returned")
+    limit: int = Field(..., description="Maximum number of road features returned")
+    truncated: bool = Field(
+        False,
+        description="True when more road features matched than the response cap.",
+    )
+    effective_parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Backend parameters and spatial scope used for the road query",
+    )
+    features: list[RoadLineFeature]
