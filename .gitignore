@@ -96,3 +96,6 @@ antigravity-*.txt
 *.swo
 Thumbs.db
 .DS_Store
+
+# Graphify output
+graphify-out/

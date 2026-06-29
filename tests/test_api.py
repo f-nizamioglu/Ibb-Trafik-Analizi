@@ -649,6 +649,51 @@ def test_geohash_cells_accepts_date_hour(geohash_cells_client):
     assert calls == [{"args": ("2025-01-17", 18), "kwargs": {}}]
 
 
+def test_geohash_cells_all_mode_requires_bbox_or_district(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get("/api/geohash-cells?date=2025-01-17&hour=18&mode=all")
+
+    assert r.status_code == 400
+    assert "requires bbox or district" in r.json()["detail"]
+    assert calls == []
+
+
+def test_geohash_cells_all_mode_accepts_scoped_bbox(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18&mode=all"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+        "&max_cells=2500"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {
+                "bbox": (28.95, 41.02, 29.08, 41.10),
+                "mode": "all",
+                "max_cells": 2500,
+            },
+        }
+    ]
+
+
+def test_geohash_cells_all_mode_rejects_too_large_bbox(geohash_cells_client):
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18&mode=all"
+        "&min_lon=27.0&min_lat=40.0&max_lon=31.0&max_lat=42.0"
+    )
+
+    assert r.status_code == 400
+    assert "too large" in r.json()["detail"]
+    assert calls == []
+
+
 def test_geohash_cells_requires_date_and_hour(geohash_cells_client):
     client, calls = geohash_cells_client
 
@@ -803,6 +848,212 @@ def test_geohash_to_polygon_is_closed_ring_in_lonlat_order():
     assert ring[3] == [min_lon, max_lat]
 
 
+@pytest.mark.parametrize(
+    ("avg_speed", "expected"),
+    [
+        (19.9, "severe"),
+        (20.0, "congested"),
+        (34.9, "congested"),
+        (35.0, "moderate"),
+        (49.9, "moderate"),
+        (50.0, "free_flow"),
+    ],
+)
+def test_cell_severity_classification(avg_speed, expected):
+    from backend.app.services.geohash_service import classify_cell_severity
+
+    assert classify_cell_severity(avg_speed) == expected
+
+
+def test_cell_congestion_score_representative_values():
+    from backend.app.services.geohash_service import compute_cell_congestion_score
+
+    assert compute_cell_congestion_score(10.0) == 100.0
+    assert compute_cell_congestion_score(35.0) == 50.0
+    assert compute_cell_congestion_score(50.0) == 0.0
+
+
+def test_geohash_cell_response_includes_geometry_and_severity_fields():
+    from backend.app.models.cluster import (
+        GeohashCellFeature,
+        GeohashCellGeometry,
+        GeohashCellProperties,
+        GeohashCellResponse,
+    )
+
+    response = GeohashCellResponse(
+        date="2025-01-17",
+        hour=18,
+        mode="all",
+        avg_speed_threshold=None,
+        max_cells=2500,
+        cell_count=1,
+        features=[
+            GeohashCellFeature(
+                geometry=GeohashCellGeometry(
+                    coordinates=[[
+                        [28.95, 41.02],
+                        [28.96, 41.02],
+                        [28.96, 41.03],
+                        [28.95, 41.03],
+                        [28.95, 41.02],
+                    ]],
+                ),
+                properties=GeohashCellProperties(
+                    geohash="sxk9jc",
+                    measurement_count=2,
+                    record_count=2,
+                    avg_speed_kmh=28.0,
+                    min_speed_kmh=20.0,
+                    max_speed_kmh=36.0,
+                    sum_vehicle_count=420,
+                    avg_vehicle_count=210.0,
+                    congestion_score=73.3,
+                    severity="congested",
+                    severity_label="Yoğun",
+                    color="#fb8c00",
+                ),
+            )
+        ],
+    )
+
+    data = response.model_dump()
+    feature = data["features"][0]
+    assert feature["geometry"]["type"] == "Polygon"
+    assert feature["properties"]["severity"] == "congested"
+    assert feature["properties"]["severity_label"] == "Yoğun"
+    assert feature["properties"]["color"] == "#fb8c00"
+
+
+def test_geohash_cell_response_includes_severity_counts():
+    """severity_counts must be present with all four keys."""
+    from backend.app.models.cluster import (
+        GeohashCellFeature,
+        GeohashCellGeometry,
+        GeohashCellProperties,
+        GeohashCellResponse,
+        SeverityCounts,
+    )
+
+    response = GeohashCellResponse(
+        date="2025-01-17",
+        hour=18,
+        mode="all",
+        avg_speed_threshold=None,
+        max_cells=2500,
+        cell_count=2,
+        total_cells=2,
+        returned_cells=2,
+        severity_counts=SeverityCounts(free_flow=1, moderate=0, congested=1, severe=0),
+        features=[
+            GeohashCellFeature(
+                geometry=GeohashCellGeometry(
+                    coordinates=[[[28.95, 41.02], [28.96, 41.02],
+                                  [28.96, 41.03], [28.95, 41.03],
+                                  [28.95, 41.02]]],
+                ),
+                properties=GeohashCellProperties(
+                    geohash="sxk9jc",
+                    measurement_count=2, record_count=2,
+                    avg_speed_kmh=28.0, min_speed_kmh=20.0, max_speed_kmh=36.0,
+                    sum_vehicle_count=420, avg_vehicle_count=210.0,
+                    congestion_score=73.3,
+                    severity="congested", severity_label="Yoğun", color="#ffa726",
+                ),
+            ),
+            GeohashCellFeature(
+                geometry=GeohashCellGeometry(
+                    coordinates=[[[28.97, 41.02], [28.98, 41.02],
+                                  [28.98, 41.03], [28.97, 41.03],
+                                  [28.97, 41.02]]],
+                ),
+                properties=GeohashCellProperties(
+                    geohash="sxk9jd",
+                    measurement_count=1, record_count=1,
+                    avg_speed_kmh=55.0, min_speed_kmh=55.0, max_speed_kmh=55.0,
+                    sum_vehicle_count=300, avg_vehicle_count=300.0,
+                    congestion_score=0.0,
+                    severity="free_flow", severity_label="Akıcı", color="#66bb6a",
+                ),
+            ),
+        ],
+    )
+
+    data = response.model_dump()
+    assert "severity_counts" in data
+    sc = data["severity_counts"]
+    assert sc["free_flow"] == 1
+    assert sc["moderate"] == 0
+    assert sc["congested"] == 1
+    assert sc["severe"] == 0
+    assert data["total_cells"] == 2
+    assert data["returned_cells"] == 2
+
+
+def test_severity_counts_all_zeros_when_no_features():
+    """severity_counts defaults to all zeros for an empty response."""
+    from backend.app.models.cluster import GeohashCellResponse, SeverityCounts
+
+    response = GeohashCellResponse(
+        date="2025-01-17",
+        hour=8,
+        mode="all",
+        avg_speed_threshold=None,
+        max_cells=2500,
+        cell_count=0,
+        total_cells=0,
+        returned_cells=0,
+        severity_counts=SeverityCounts(),
+        features=[],
+    )
+
+    data = response.model_dump()
+    sc = data["severity_counts"]
+    assert sc == {"free_flow": 0, "moderate": 0, "congested": 0, "severe": 0}
+
+
+def test_mode_all_does_not_forward_speed_threshold(geohash_cells_client):
+    """When mode=all, avg_speed_threshold should NOT be sent to the service."""
+    client, calls = geohash_cells_client
+
+    r = client.get(
+        "/api/geohash-cells?date=2025-01-17&hour=18&mode=all"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 200
+    # The router should forward mode=all but NOT avg_speed_threshold
+    assert len(calls) == 1
+    kwargs = calls[0]["kwargs"]
+    assert kwargs.get("mode") == "all"
+    assert "avg_speed_threshold" not in kwargs
+
+
+@pytest.mark.parametrize(
+    ("avg_speed", "expected"),
+    [
+        (0.0, "severe"),
+        (5.0, "severe"),
+        (100.0, "free_flow"),
+        (200.0, "free_flow"),
+    ],
+)
+def test_cell_severity_classification_extremes(avg_speed, expected):
+    """Boundary check: extreme speeds still classify correctly."""
+    from backend.app.services.geohash_service import classify_cell_severity
+
+    assert classify_cell_severity(avg_speed) == expected
+
+
+def test_cell_congestion_score_extreme_values():
+    """Score clamps to 0-100 at extremes."""
+    from backend.app.services.geohash_service import compute_cell_congestion_score
+
+    assert compute_cell_congestion_score(0.0) == 100.0
+    assert compute_cell_congestion_score(100.0) == 0.0
+    assert compute_cell_congestion_score(-5.0) == 100.0
+
+
 # ── Congested road line overlay (/api/congested-roads) ────────────────────────
 
 @pytest.fixture
@@ -816,6 +1067,7 @@ def congested_roads_client(monkeypatch):
         RoadLineFeature,
         RoadLineGeometry,
         RoadLineProperties,
+        SeverityCounts,
     )
     from backend.app.routers import clusters as clusters_router
 
@@ -824,33 +1076,69 @@ def congested_roads_client(monkeypatch):
     async def fake_get_congested_roads(*args, **kwargs):
         calls.append({"args": args, "kwargs": kwargs})
         road_level = kwargs.get("road_level", "main")
-        road_filter = "corridor_summary" if road_level == "main" else "all_segments"
+        style = kwargs.get("style", "plain")
+        if style == "traffic":
+            road_filter = "traffic_corridors"
+        elif road_level == "main":
+            road_filter = "corridor_summary"
+        else:
+            road_filter = "all_segments"
+
+        if style == "traffic":
+            props = RoadLineProperties(
+                road_id=1,
+                osm_id=123,
+                highway="motorway",
+                name="1. Çevre Yolu",
+                clipped_length_m=42.0,
+                avg_speed_kmh=18.0,
+                cell_count=3,
+                severity="severe",
+                severity_label="Çok yoğun",
+                color="#c62828",
+            )
+            severity_counts = SeverityCounts(severe=1)
+            effective_parameters = {
+                "scope": "test",
+                "road_level": road_level,
+                "road_filter": road_filter,
+                "style": "traffic",
+                "severity_basis": "cell_derived",
+            }
+        else:
+            props = RoadLineProperties(
+                road_id=1,
+                osm_id=123,
+                highway="motorway",
+                name="1. Çevre Yolu",
+                clipped_length_m=42.0,
+            )
+            severity_counts = None
+            effective_parameters = {
+                "scope": "test",
+                "road_level": road_level,
+                "road_filter": road_filter,
+                "style": "plain",
+            }
+
         return CongestedRoadResponse(
             date=args[0],
             hour=args[1],
             window_hours=kwargs.get("window_hours", 1),
             avg_speed_threshold=kwargs.get("avg_speed_threshold", 25.0),
+            style=style,
             road_count=1,
             limit=60 if road_level == "main" else 1000,
             truncated=False,
-            effective_parameters={
-                "scope": "test",
-                "road_level": road_level,
-                "road_filter": road_filter,
-            },
+            severity_counts=severity_counts,
+            effective_parameters=effective_parameters,
             features=[
                 RoadLineFeature(
                     geometry=RoadLineGeometry(
                         type="LineString",
                         coordinates=[[28.95, 41.02], [28.96, 41.03]],
                     ),
-                    properties=RoadLineProperties(
-                        road_id=1,
-                        osm_id=123,
-                        highway="motorway",
-                        name="1. Çevre Yolu",
-                        clipped_length_m=42.0,
-                    ),
+                    properties=props,
                 )
             ],
         )
@@ -1049,6 +1337,161 @@ def test_congested_roads_main_level_is_corridor_only():
     assert _matches_corridor_name("1. Çevre Yolu")
     assert not _matches_corridor_name("Tema Caddesi")
     assert not _matches_corridor_name("Atatürk Caddesi")
+
+
+# ── Traffic-corridor style (cell-derived severity) ───────────────────────────
+
+def test_congested_roads_default_style_does_not_forward_style(congested_roads_client):
+    """Default plain style must NOT add a 'style' kwarg (keeps the demo URL clean)."""
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+    )
+
+    assert r.status_code == 200
+    assert "style" not in calls[0]["kwargs"]
+    assert r.json()["style"] == "plain"
+    assert r.json()["severity_counts"] is None
+
+
+def test_congested_roads_traffic_style_forwarded_and_colored(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+        "&style=traffic"
+    )
+
+    assert r.status_code == 200
+    assert calls[0]["kwargs"]["style"] == "traffic"
+    data = r.json()
+    assert data["style"] == "traffic"
+    assert data["effective_parameters"]["road_filter"] == "traffic_corridors"
+    assert data["effective_parameters"]["severity_basis"] == "cell_derived"
+    assert data["severity_counts"]["severe"] == 1
+    props = data["features"][0]["properties"]
+    assert props["severity"] == "severe"
+    assert props["severity_label"] == "Çok yoğun"
+    assert props["color"] == "#c62828"
+    assert props["avg_speed_kmh"] == 18.0
+    assert props["cell_count"] == 3
+
+
+def test_congested_roads_traffic_style_accepts_district(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18&district=besiktas&style=traffic"
+    )
+
+    assert r.status_code == 200
+    assert calls == [
+        {
+            "args": ("2025-01-17", 18),
+            "kwargs": {"district": "besiktas", "road_level": "main", "style": "traffic"},
+        }
+    ]
+
+
+def test_congested_roads_traffic_style_rejects_too_large_bbox(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18&style=traffic"
+        "&min_lon=27.0&min_lat=40.0&max_lon=31.0&max_lat=42.0"
+    )
+
+    assert r.status_code == 400
+    assert "too large" in r.json()["detail"]
+    assert calls == []
+
+
+def test_congested_roads_plain_style_allows_large_bbox(congested_roads_client):
+    """The traffic-only area guard must not affect the plain overlay path."""
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=27.0&min_lat=40.0&max_lon=31.0&max_lat=42.0"
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+
+
+def test_congested_roads_rejects_invalid_style(congested_roads_client):
+    client, calls = congested_roads_client
+
+    r = client.get(
+        "/api/congested-roads?date=2025-01-17&hour=18"
+        "&min_lon=28.95&min_lat=41.02&max_lon=29.08&max_lat=41.10"
+        "&style=fancy"
+    )
+
+    assert r.status_code == 422
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("avg_speed", "expected"),
+    [
+        (10.0, "severe"),
+        (19.9, "severe"),
+        (20.0, "congested"),
+        (34.9, "congested"),
+        (35.0, "moderate"),
+        (49.9, "moderate"),
+        (50.0, "free_flow"),
+        (90.0, "free_flow"),
+    ],
+)
+def test_classify_corridor_severity_matches_cell_thresholds(avg_speed, expected):
+    from backend.app.services.geohash_service import classify_cell_severity
+    from backend.app.services.road_service import classify_corridor_severity
+
+    assert classify_corridor_severity(avg_speed) == expected
+    # Corridor severity must share the cell layer's thresholds for a consistent story.
+    assert classify_corridor_severity(avg_speed) == classify_cell_severity(avg_speed)
+
+
+def test_corridor_severity_meta_has_all_classes_and_line_colors():
+    from backend.app.services.road_service import _CORRIDOR_SEVERITY_META
+
+    assert set(_CORRIDOR_SEVERITY_META) == {"free_flow", "moderate", "congested", "severe"}
+    for meta in _CORRIDOR_SEVERITY_META.values():
+        assert meta["label"]
+        assert meta["color"].startswith("#")
+
+
+def test_road_line_properties_accepts_cell_derived_fields():
+    """The traffic-style severity fields must round-trip and stay optional."""
+    from backend.app.models.cluster import RoadLineProperties
+
+    # Plain overlay: severity fields omitted → all None.
+    plain = RoadLineProperties(road_id=1, clipped_length_m=10.0)
+    assert plain.severity is None
+    assert plain.color is None
+
+    # Traffic style: severity fields populated.
+    traffic = RoadLineProperties(
+        road_id=2,
+        highway="trunk",
+        name="D-100",
+        clipped_length_m=120.5,
+        avg_speed_kmh=31.4,
+        cell_count=5,
+        severity="congested",
+        severity_label="Yoğun",
+        color="#ef6c00",
+    )
+    dumped = traffic.model_dump()
+    assert dumped["severity"] == "congested"
+    assert dumped["color"] == "#ef6c00"
+    assert dumped["avg_speed_kmh"] == 31.4
+    assert dumped["cell_count"] == 5
 
 
 # ── Live DB endpoint tests (skipped if no DB) ────────────────────────────────

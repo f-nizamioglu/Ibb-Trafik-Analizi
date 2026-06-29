@@ -294,7 +294,15 @@
             flex-shrink: 0;
         }
         .legend-color.square { border-radius: 2px; }
+        .legend-color.line {
+            height: 4px;
+            border-radius: 2px;
+            border: none;
+            align-self: center;
+        }
         .legend-sep { border-top: 1px solid #eee; margin: 6px 0 3px; }
+        .legend-item.muted { color: #aaa; }
+        .legend-item.muted .legend-color { opacity: 0.35 !important; }
         .legend-note { font-size: 11px; color: #888; margin-top: 2px; }
 
         /* ── Status Messages ────────────────────────────────────────── */
@@ -429,15 +437,15 @@
         <span class="control-section-title">Harita Katmanları</span>
         <div class="control-group">
             <label class="param-toggle" for="toggleGeohash">
-                <input type="checkbox" id="toggleGeohash"> Ölçüm hücreleri
+                <input type="checkbox" id="toggleGeohash"> Trafik Hücreleri
             </label>
             <span class="param-info" id="geohashInfo"></span>
         </div>
         <div class="control-group">
             <label class="param-toggle" for="toggleRoads">
-                <input type="checkbox" id="toggleRoads"> Ana yol çizgileri
+                <input type="checkbox" id="toggleRoads"> Trafik Koridorları
             </label>
-            <span class="control-hint">Dar alanlarda önerilir</span>
+            <span class="control-hint">Dar alanlarda, hücrelerin içindeki ana yolları trafik durumuna göre vurgular.</span>
             <span class="param-info" id="roadInfo"></span>
         </div>
     </div>
@@ -503,6 +511,33 @@
             MEDIUM: 'Orta Yoğunluk',
             LOW:    'Düşük Yoğunluk'
         };
+        var CELL_SEVERITY_COLORS = {
+            free_flow: '#66bb6a',
+            moderate: '#ffee58',
+            congested: '#ffa726',
+            severe: '#ef5350'
+        };
+        var CELL_SEVERITY_LABELS = {
+            free_flow: 'Akıcı',
+            moderate: 'Orta',
+            congested: 'Yoğun',
+            severe: 'Çok yoğun'
+        };
+        // Traffic-corridor (road line) colors — darker/more saturated than the cell
+        // fills so corridors read clearly on top of the subdued cell choropleth.
+        // Must mirror _CORRIDOR_SEVERITY_META in backend road_service.py.
+        var CORRIDOR_SEVERITY_COLORS = {
+            free_flow: '#2e7d32',
+            moderate: '#f9a825',
+            congested: '#ef6c00',
+            severe: '#c62828'
+        };
+        var CORRIDOR_SEVERITY_LABELS = {
+            free_flow: 'Akıcı',
+            moderate: 'Orta',
+            congested: 'Yoğun',
+            severe: 'Çok yoğun'
+        };
 
         // Default clustering parameters — must match the backend service defaults.
         // A param is only sent to the API when it differs from its default, so the
@@ -515,6 +550,7 @@
         // no client-side bbox approximation is used for districts anymore.
 
         var RECT_STYLE = {
+            pane: 'selectionPane',
             color: '#1565c0',
             weight: 2,
             fillColor: '#1565c0',
@@ -526,6 +562,7 @@
         // District boundary outline: clearly visible line, very light fill so it
         // never hides cluster markers. Non-interactive (does not steal clicks).
         var DISTRICT_STYLE = {
+            pane: 'selectionPane',
             color: '#6a1b9a',
             weight: 2.5,
             fillColor: '#6a1b9a',
@@ -555,32 +592,73 @@
             };
         }
 
-        // Geohash measurement-cell fill ramp: slower avg speed = more congested = redder.
-        function geohashCellColor(avgSpeed) {
-            if (avgSpeed <= 10) return '#7f0000';
-            if (avgSpeed <= 15) return '#c62828';
-            if (avgSpeed <= 20) return '#e53935';
-            if (avgSpeed <= 25) return '#fb8c00';
-            if (avgSpeed <= 35) return '#fdd835';
-            return '#9ccc65';
+        function geohashFallbackColor(avgSpeed) {
+            if (avgSpeed <= 10) return '#c62828';
+            if (avgSpeed <= 15) return '#e53935';
+            if (avgSpeed <= 20) return '#ef5350';
+            if (avgSpeed <= 25) return '#ffa726';
+            if (avgSpeed <= 35) return '#ffee58';
+            return '#66bb6a';
         }
-        function geohashCellStyle(props) {
+        function geohashCellColor(props) {
+            if (props && props.severity && CELL_SEVERITY_COLORS[props.severity]) {
+                return CELL_SEVERITY_COLORS[props.severity];
+            }
+            if (props && props.color) return props.color;
+            return geohashFallbackColor(props ? props.avg_speed_kmh : 0);
+        }
+        // When the Trafik Koridorları layer is also on, the cells are demoted to
+        // a faint background field so the colored corridors become the readable
+        // foreground inside dense, mosaic-like city-center areas.
+        var _cellsSubdued = false;
+        function geohashCellStyle(props, subdued) {
+            var fill = geohashCellColor(props);
             return {
-                color: '#444',
-                weight: 1,
-                opacity: 0.55,
-                fillColor: geohashCellColor(props.avg_speed_kmh),
-                fillOpacity: 0.5
+                color: fill,
+                weight: subdued ? 0.3 : 0.5,
+                opacity: subdued ? 0.3 : 0.5,
+                fillColor: fill,
+                fillOpacity: subdued ? 0.20 : 0.32
             };
         }
 
+        // Road overlay. In the "Trafik Koridorları" view the backend returns a
+        // cell-derived severity/color per corridor (length-weighted mean of the
+        // intersecting measurement cells — not road-segment ground truth), so the
+        // line is colored by traffic. When no severity is present (plain overlay)
+        // it falls back to a neutral blue-gray context line.
+        function corridorWeight(highway) {
+            if (highway === 'motorway' || highway === 'trunk') return 4;
+            if (highway === 'primary' || highway === 'secondary') return 3;
+            if (/_link$/.test(highway || '')) return 2;
+            return 2;
+        }
         function roadLineStyle(feature) {
-            var highway = feature && feature.properties ? feature.properties.highway : '';
+            var props = (feature && feature.properties) || {};
+            var highway = props.highway || '';
             var isHighCapacity = highway === 'motorway' || highway === 'trunk';
+            var isLink = /_link$/.test(highway);
+            var severityColor = props.color
+                || (props.severity && CORRIDOR_SEVERITY_COLORS[props.severity]);
+            if (severityColor) {
+                // Traffic-corridor styling: readable colored foreground line.
+                return {
+                    color: severityColor,
+                    weight: corridorWeight(highway),
+                    opacity: isHighCapacity ? 0.9 : (isLink ? 0.7 : 0.8),
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    interactive: false
+                };
+            }
+            // Plain overlay fallback: neutral, visually demoted context line.
             return {
-                color: isHighCapacity ? '#0d47a1' : '#1976d2',
-                weight: isHighCapacity ? 3 : 2,
-                opacity: isHighCapacity ? 0.78 : 0.62,
+                color: '#546e7a',
+                weight: isHighCapacity ? 2 : 1.2,
+                opacity: isHighCapacity ? 0.55 : 0.40,
+                lineCap: 'round',
+                lineJoin: 'round',
+                dashArray: isHighCapacity ? null : '4 3',
                 interactive: false
             };
         }
@@ -624,25 +702,57 @@
 
         // ── Map Setup ────────────────────────────────────────────────
         var map = L.map('map').setView(ISTANBUL_CENTER, DEFAULT_ZOOM);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+
+        // Light basemap (CartoDB Positron) — better analytical overlay visibility.
+        var lightTiles = L.tileLayer(
+            'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        });
+        var osmTiles = L.tileLayer(
+            'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
             maxZoom: 18
-        }).addTo(map);
+        });
+        lightTiles.addTo(map);
+        L.control.layers(
+            { 'Açık (Carto)': lightTiles, 'OSM': osmTiles },
+            null,
+            { position: 'topright', collapsed: true }
+        ).addTo(map);
 
         var clusterLayer = null;
 
-        // Geohash cells render in their own pane below the cluster markers, so the
-        // centroid markers always stay on top and remain clickable.
-        map.createPane('geohashPane');
-        map.getPane('geohashPane').style.zIndex = 350;
+        // ── Pane hierarchy ───────────────────────────────────────────
+        //   cellsPane     (350) — choropleth traffic cells (subdued under roads)
+        //   roadsPane     (380) — traffic corridors / road overlay
+        //   selectionPane (390) — bbox rect / district outline
+        //   clusterPane   (420) — DBSCAN centroid markers, always topmost
+
+        map.createPane('cellsPane');
+        map.getPane('cellsPane').style.zIndex = 350;
+
+        map.createPane('roadsPane');
+        map.getPane('roadsPane').style.zIndex = 380;
+        map.getPane('roadsPane').style.pointerEvents = 'none';
+
+        map.createPane('selectionPane');
+        map.getPane('selectionPane').style.zIndex = 390;
+        map.getPane('selectionPane').style.pointerEvents = 'none';
+
+        map.createPane('clusterPane');
+        map.getPane('clusterPane').style.zIndex = 420;
+
         var geohashLayer = null;
         var geohashAbortController = null;
 
-        map.createPane('roadPane');
-        map.getPane('roadPane').style.zIndex = 390;
-        map.getPane('roadPane').style.pointerEvents = 'none';
         var roadLayer = null;
         var roadAbortController = null;
+
+        // Last geohash response metadata — used by the data-aware legend.
+        var lastCellMeta = null;
+
 
         // ── Region state ─────────────────────────────────────────────
         // regionMode: 'all' | 'mapview' | 'rectangle' | 'district'
@@ -661,19 +771,76 @@
         var drawTempRect = null;     // in-progress rectangle while dragging
 
         // ── Legend Control ────────────────────────────────────────────
-        var legend = L.control({ position: 'bottomright' });
-        legend.onAdd = function () {
-            var div = L.DomUtil.create('div', 'legend-box');
-            div.innerHTML =
+        var legendDiv = null;
+        var CELL_SEVERITY_ORDER = ['free_flow', 'moderate', 'congested', 'severe'];
+        // Last road response metadata — drives the data-aware corridor legend.
+        var lastRoadMeta = null;
+
+        function emptySeverityCounts() {
+            return { free_flow: 0, moderate: 0, congested: 0, severe: 0 };
+        }
+
+        function cellLegendRow(severityKey, count) {
+            var label = CELL_SEVERITY_LABELS[severityKey] || severityKey;
+            var color = CELL_SEVERITY_COLORS[severityKey] || '#999';
+            var mutedClass = count === 0 ? ' muted' : '';
+            return '<div class="legend-item' + mutedClass + '">' +
+                '<span class="legend-color square" style="background:' + color + ';opacity:0.65"></span> ' +
+                label + ' (' + count + ')</div>';
+        }
+
+        function corridorLegendRow(severityKey, count) {
+            var label = CORRIDOR_SEVERITY_LABELS[severityKey] || severityKey;
+            var color = CORRIDOR_SEVERITY_COLORS[severityKey] || '#999';
+            var hasCount = typeof count === 'number';
+            var mutedClass = (hasCount && count === 0) ? ' muted' : '';
+            var countText = hasCount ? ' (' + count + ')' : '';
+            return '<div class="legend-item' + mutedClass + '">' +
+                '<span class="legend-color line" style="background:' + color + '"></span> ' +
+                label + countText + '</div>';
+        }
+
+        function updateLegend() {
+            if (!legendDiv) return;
+            var html =
                 '<strong>Lejant</strong>' +
                 '<div class="legend-item"><span class="legend-color" style="background:#d32f2f"></span> Yüksek Yoğunluk</div>' +
                 '<div class="legend-item"><span class="legend-color" style="background:#f57c00"></span> Orta Yoğunluk</div>' +
                 '<div class="legend-item"><span class="legend-color" style="background:#fbc02d"></span> Düşük Yoğunluk</div>' +
-                '<div class="legend-sep"></div>' +
-                '<div class="legend-item"><span class="legend-color square" style="background:#e53935;opacity:0.55"></span> Ölçüm hücresi</div>' +
-                '<div class="legend-item"><span class="legend-color" style="background:#0d47a1;height:3px;border-radius:0"></span> Ana yol koridoru</div>' +
                 '<div class="legend-note">Daireler DBSCAN küme merkezidir.</div>';
-            return div;
+
+            if (toggleGeohash.checked) {
+                var sc = (lastCellMeta && lastCellMeta.severity_counts)
+                    ? lastCellMeta.severity_counts
+                    : emptySeverityCounts();
+                html += '<div class="legend-sep"></div><strong>Trafik Hücreleri</strong>';
+                CELL_SEVERITY_ORDER.forEach(function (key) {
+                    html += cellLegendRow(key, sc[key] || 0);
+                });
+            }
+
+            if (toggleRoads.checked) {
+                html += '<div class="legend-sep"></div><strong>Trafik Koridorları</strong>';
+                if (lastRoadMeta && lastRoadMeta.isTraffic) {
+                    var rc = lastRoadMeta.severity_counts;
+                    CELL_SEVERITY_ORDER.forEach(function (key) {
+                        var count = rc ? (rc[key] || 0) : undefined;
+                        html += corridorLegendRow(key, count);
+                    });
+                    html += '<div class="legend-note">Renkler, koridorun kestiği ölçüm hücrelerinden türetilmiştir.</div>';
+                } else {
+                    html += '<div class="legend-item"><span class="legend-color line" style="background:#546e7a;opacity:0.7"></span> Ana yol koridoru</div>';
+                }
+            }
+
+            legendDiv.innerHTML = html;
+        }
+
+        var legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function () {
+            legendDiv = L.DomUtil.create('div', 'legend-box');
+            updateLegend();
+            return legendDiv;
         };
         legend.addTo(map);
 
@@ -1021,7 +1188,9 @@
 
             clusterLayer = L.geoJSON(data, {
                 pointToLayer: function (feature, latlng) {
-                    return L.circleMarker(latlng, markerStyle(feature.properties));
+                    var style = markerStyle(feature.properties);
+                    style.pane = 'clusterPane';
+                    return L.circleMarker(latlng, style);
                 },
                 onEachFeature: function (feature, layer) {
                     var html = buildPopupContent(
@@ -1137,11 +1306,19 @@
                 map.removeLayer(geohashLayer);
                 geohashLayer = null;
             }
+            lastCellMeta = null;
         }
 
         function buildGeohashPopup(props) {
+            var severityKey = props.severity || '';
+            var severityLabel = props.severity_label || CELL_SEVERITY_LABELS[severityKey] || severityKey || '-';
+            var scoreText = props.congestion_score != null
+                ? props.congestion_score.toFixed(1) + '/100'
+                : '-';
             return '<div>' +
-                '<div class="popup-row"><span class="popup-label">Ölçüm hücresi:</span><span class="popup-value">' + escapeHtml(props.geohash) + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Trafik hücresi:</span><span class="popup-value">' + escapeHtml(props.geohash) + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Trafik Durumu:</span><span class="popup-value">' + escapeHtml(severityLabel) + '</span></div>' +
+                '<div class="popup-row"><span class="popup-label">Hücre Skoru:</span><span class="popup-value">' + scoreText + '</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Ortalama Hız:</span><span class="popup-value">' + props.avg_speed_kmh.toFixed(1) + ' km/h</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Min / Maks Hız:</span><span class="popup-value">' + props.min_speed_kmh.toFixed(1) + ' / ' + props.max_speed_kmh.toFixed(1) + ' km/h</span></div>' +
                 '<div class="popup-row"><span class="popup-label">Araç Hacmi:</span><span class="popup-value">' + props.sum_vehicle_count.toLocaleString('tr-TR') + '</span></div>' +
@@ -1152,15 +1329,40 @@
                 '</div>';
         }
 
+        function captureCellMeta(data) {
+            if (!data) {
+                lastCellMeta = null;
+                return;
+            }
+            var sc = data.severity_counts || emptySeverityCounts();
+            lastCellMeta = {
+                severity_counts: {
+                    free_flow: sc.free_flow || 0,
+                    moderate: sc.moderate || 0,
+                    congested: sc.congested || 0,
+                    severe: sc.severe || 0
+                },
+                cell_count: data.cell_count || 0,
+                truncated: !!data.truncated
+            };
+        }
+
         function renderGeohashCells(data) {
             clearGeohashLayer();
+            captureCellMeta(data);
+            updateLegend();
+
             if (!data || !data.features || data.features.length === 0) {
                 geohashInfo.textContent = '0 hücre';
                 return;
             }
+            // Subdue cells when corridors are also on so the colored road lines
+            // become the readable foreground in dense city-center areas.
+            _cellsSubdued = toggleGeohash.checked && toggleRoads.checked;
+            var subdued = _cellsSubdued;
             geohashLayer = L.geoJSON(data, {
-                pane: 'geohashPane',
-                style: function (feature) { return geohashCellStyle(feature.properties); },
+                pane: 'cellsPane',
+                style: function (feature) { return geohashCellStyle(feature.properties, subdued); },
                 onEachFeature: function (feature, layer) {
                     layer.bindPopup(buildGeohashPopup(feature.properties));
                 }
@@ -1173,23 +1375,26 @@
         function buildGeohashUrl() {
             var params = new URLSearchParams({
                 date: getSelectedDate(),
-                hour: getSelectedHour()
+                hour: getSelectedHour(),
+                mode: 'all',
+                max_cells: '2500'
             });
-            // Only the window + speed filter (and region) shape the cells; eps and
-            // minpoints are clustering-only and do not apply to this layer.
-            if (getSpeedThreshold() !== DEFAULT_PARAMS.speed) {
-                params.set('avg_speed_threshold', getSpeedThreshold());
-            }
+            // Cell mode ignores eps/minpoints; the backend classifies every
+            // measured cell in the scoped window by avg_speed.
             if (getWindowHours() !== DEFAULT_PARAMS.windowHours) {
                 params.set('window_hours', getWindowHours());
             }
             if (activeDistrict) {
                 params.set('district', activeDistrict);
-            } else if (activeBbox) {
-                params.set('min_lon', activeBbox.minLon.toFixed(6));
-                params.set('min_lat', activeBbox.minLat.toFixed(6));
-                params.set('max_lon', activeBbox.maxLon.toFixed(6));
-                params.set('max_lat', activeBbox.maxLat.toFixed(6));
+            } else {
+                if (!activeBbox && regionMode === 'rectangle') {
+                    return null;
+                }
+                var cellBbox = activeBbox || boundsToBbox(map.getBounds());
+                params.set('min_lon', cellBbox.minLon.toFixed(6));
+                params.set('min_lat', cellBbox.minLat.toFixed(6));
+                params.set('max_lon', cellBbox.maxLon.toFixed(6));
+                params.set('max_lat', cellBbox.maxLat.toFixed(6));
             }
             return API_BASE + '/api/geohash-cells?' + params.toString();
         }
@@ -1201,6 +1406,7 @@
             if (!toggleGeohash.checked) {
                 clearGeohashLayer();
                 geohashInfo.textContent = '';
+                updateLegend();
                 return;
             }
             if (!getSelectedDate()) return;
@@ -1211,10 +1417,22 @@
             geohashAbortController = new AbortController();
             geohashInfo.textContent = 'yükleniyor...';
 
-            fetch(buildGeohashUrl(), { signal: geohashAbortController.signal })
+            var url = buildGeohashUrl();
+            if (!url) {
+                clearGeohashLayer();
+                geohashInfo.textContent = 'bbox veya ilçe seçiniz';
+                return;
+            }
+
+            fetch(url, { signal: geohashAbortController.signal })
                 .then(function (response) {
                     if (response.status === 503) {
                         throw { __districtNotImported: true };
+                    }
+                    if (response.status === 400) {
+                        return response.json().then(function (body) {
+                            throw { __badRequest: true, detail: body.detail || 'Geçersiz hücre kapsamı.' };
+                        });
                     }
                     if (!response.ok) {
                         throw new Error('HTTP ' + response.status);
@@ -1227,8 +1445,20 @@
                 .catch(function (err) {
                     if (err && err.name === 'AbortError') return;
                     clearGeohashLayer();
+                    updateLegend();
+                    syncLayerEmphasis();
                     if (err && err.__districtNotImported) {
                         geohashInfo.textContent = 'ilçe sınırı yok';
+                        return;
+                    }
+                    if (err && err.__badRequest) {
+                        // The all-cell layer is performance-capped to a bounded scope.
+                        // Show a clear Turkish explanation instead of the raw guard text.
+                        geohashInfo.textContent = 'alan çok geniş';
+                        appendRegionWarning(
+                            'Trafik hücreleri performans nedeniyle yalnızca ilçe, ' +
+                            'harita görünümü veya seçili dikdörtgen alan için gösterilir.'
+                        );
                         return;
                     }
                     console.error('Geohash layer error:', err);
@@ -1245,20 +1475,33 @@
                 map.removeLayer(roadLayer);
                 roadLayer = null;
             }
+            lastRoadMeta = null;
+        }
+
+        function captureRoadMeta(data) {
+            if (!data) { lastRoadMeta = null; return; }
+            var ep = data.effective_parameters || {};
+            lastRoadMeta = {
+                isTraffic: data.style === 'traffic' || ep.road_filter === 'traffic_corridors',
+                severity_counts: data.severity_counts || null,
+                road_count: data.road_count || 0,
+                truncated: !!data.truncated
+            };
         }
 
         function renderRoadLines(data) {
             clearRoadLayer();
-            var isCorridorSummary = data
-                && data.effective_parameters
-                && data.effective_parameters.road_filter === 'corridor_summary';
-            var unitLabel = isCorridorSummary ? 'koridor' : 'yol';
+            captureRoadMeta(data);
+            var ep = (data && data.effective_parameters) || {};
+            var isCorridor = ep.road_filter === 'corridor_summary'
+                || ep.road_filter === 'traffic_corridors';
+            var unitLabel = isCorridor ? 'koridor' : 'yol';
             if (!data || !data.features || data.features.length === 0) {
                 roadInfo.textContent = '0 ' + unitLabel;
                 return;
             }
             roadLayer = L.geoJSON(data, {
-                pane: 'roadPane',
+                pane: 'roadsPane',
                 style: roadLineStyle,
                 interactive: false
             }).addTo(map);
@@ -1273,11 +1516,10 @@
             }
             var params = new URLSearchParams({
                 date: getSelectedDate(),
-                hour: getSelectedHour()
+                hour: getSelectedHour(),
+                // Trafik Koridorları view: color major corridors by cell-derived severity.
+                style: 'traffic'
             });
-            if (getSpeedThreshold() !== DEFAULT_PARAMS.speed) {
-                params.set('avg_speed_threshold', getSpeedThreshold());
-            }
             if (getWindowHours() !== DEFAULT_PARAMS.windowHours) {
                 params.set('window_hours', getWindowHours());
             }
@@ -1296,6 +1538,8 @@
             if (!toggleRoads.checked) {
                 clearRoadLayer();
                 roadInfo.textContent = '';
+                syncLayerEmphasis();
+                updateLegend();
                 return;
             }
             if (!getSelectedDate()) return;
@@ -1325,10 +1569,14 @@
                 })
                 .then(function (data) {
                     renderRoadLines(data);
+                    syncLayerEmphasis();
+                    updateLegend();
                 })
                 .catch(function (err) {
                     if (err && err.name === 'AbortError') return;
                     clearRoadLayer();
+                    syncLayerEmphasis();
+                    updateLegend();
                     if (err && err.__roadUnavailable) {
                         roadInfo.textContent = 'yol verisi yok';
                         return;
@@ -1400,6 +1648,10 @@
             setActiveModeButton('rectangle');
             drawingMode = true;
             drawStartLatLng = null;
+            clearGeohashLayer();
+            if (toggleGeohash.checked) {
+                geohashInfo.textContent = 'bbox veya ilçe seçiniz';
+            }
             map.dragging.disable();
             L.DomUtil.addClass(map.getContainer(), 'map-drawing');
             setRegionScope('Dikdörtgen Seç', null, null);
@@ -1556,12 +1808,31 @@
             refetchCurrentScope();
         });
 
-        // Toggling the geohash layer is an explicit user action → fetch once.
+        // Visual hierarchy: corridors are the readable foreground, so when both
+        // layers are on the cells are demoted to a faint background field. Re-style
+        // the existing cell layer in place (no refetch) when the state changes.
+        function syncLayerEmphasis() {
+            var shouldSubdue = toggleGeohash.checked && toggleRoads.checked;
+            if (_cellsSubdued !== shouldSubdue) {
+                _cellsSubdued = shouldSubdue;
+                if (geohashLayer) {
+                    geohashLayer.setStyle(function (feature) {
+                        return geohashCellStyle(feature.properties, _cellsSubdued);
+                    });
+                }
+            }
+        }
+
+        // Toggling a layer is an explicit user action → fetch once.
         toggleGeohash.addEventListener('change', function () {
+            syncLayerEmphasis();
+            updateLegend();
             refreshGeohashLayer();
         });
 
         toggleRoads.addEventListener('change', function () {
+            syncLayerEmphasis();
+            updateLegend();
             refreshRoadLayer();
         });
 

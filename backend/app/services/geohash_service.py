@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta
+from typing import Literal
 
 from backend.app.database import get_pool
 from backend.app.models.cluster import (
@@ -25,6 +26,7 @@ from backend.app.models.cluster import (
     GeohashCellGeometry,
     GeohashCellProperties,
     GeohashCellResponse,
+    SeverityCounts,
 )
 from backend.app.services.cluster_service import (
     _TEMPORAL_MAX_AVG_SPEED,
@@ -34,6 +36,8 @@ from backend.app.services.cluster_service import (
 from scoring.geohash_utils import decode_geohash_bounds
 
 logger = logging.getLogger(__name__)
+
+CellLayerMode = Literal["congested", "all"]
 
 # Defaults are shared with the clustering pipeline so the cells shown match the
 # measurements DBSCAN clusters by default.
@@ -46,10 +50,17 @@ _DEFAULT_WINDOW_HOURS = _TEMPORAL_WINDOW_HOURS
 _GEOHASH_CELL_LIMIT = 4000
 _FETCH_CAP = _GEOHASH_CELL_LIMIT + 1
 
+_CELL_SEVERITY_META = {
+    "free_flow": {"label": "Akıcı", "color": "#66bb6a"},
+    "moderate": {"label": "Orta", "color": "#ffee58"},
+    "congested": {"label": "Yoğun", "color": "#ffa726"},
+    "severe": {"label": "Çok yoğun", "color": "#ef5350"},
+}
+
 # Bind-parameter layout:
-#   $1 = window start (timestamp)   $3 = avg_speed threshold (km/h)
-#   $2 = window end   (timestamp)
-# Region-specific params follow: bbox uses $4..$7, district uses $4.
+#   $1 = window start (timestamp)   $3 = mode ('congested' | 'all')
+#   $2 = window end   (timestamp)   $4 = avg_speed threshold (km/h)
+# Region-specific params follow: bbox uses $5..$8, district uses $5.
 _GEOHASH_CELL_SQL = f"""
 SELECT
     geohash,
@@ -62,11 +73,11 @@ SELECT
 FROM ibb_traffic_density
 WHERE record_time >= $1::timestamp
   AND record_time <  $2::timestamp
-  AND avg_speed < $3::double precision
+  AND ($3::text = 'all' OR avg_speed < $4::double precision)
   AND geohash IS NOT NULL
   AND geohash <> ''
 GROUP BY geohash
-ORDER BY sum_vehicle_count DESC
+ORDER BY sum_vehicle_count DESC, geohash ASC
 LIMIT {_FETCH_CAP};
 """
 
@@ -81,7 +92,7 @@ WITH hour_slice AS MATERIALIZED (
     FROM ibb_traffic_density
     WHERE record_time >= $1::timestamp
       AND record_time <  $2::timestamp
-      AND avg_speed < $3::double precision
+      AND ($3::text = 'all' OR avg_speed < $4::double precision)
       AND geohash IS NOT NULL
       AND geohash <> ''
 )
@@ -96,10 +107,10 @@ SELECT
 FROM hour_slice
 WHERE ST_Intersects(
       geom,
-      ST_Transform(ST_MakeEnvelope($4, $5, $6, $7, 4326), 32636)
+      ST_Transform(ST_MakeEnvelope($5, $6, $7, $8, 4326), 32636)
   )
 GROUP BY geohash
-ORDER BY sum_vehicle_count DESC
+ORDER BY sum_vehicle_count DESC, geohash ASC
 LIMIT {_FETCH_CAP};
 """
 
@@ -112,14 +123,14 @@ WITH hour_slice AS MATERIALIZED (
     FROM ibb_traffic_density
     WHERE record_time >= $1::timestamp
       AND record_time <  $2::timestamp
-      AND avg_speed < $3::double precision
+      AND ($3::text = 'all' OR avg_speed < $4::double precision)
       AND geohash IS NOT NULL
       AND geohash <> ''
 ),
 dist AS MATERIALIZED (
     SELECT geom
     FROM istanbul_district_boundaries
-    WHERE district_key = $4
+    WHERE district_key = $5
 )
 SELECT
     h.geohash                   AS geohash,
@@ -134,7 +145,7 @@ JOIN dist d
   ON h.geom && d.geom
  AND ST_Intersects(h.geom, d.geom)
 GROUP BY h.geohash
-ORDER BY sum_vehicle_count DESC
+ORDER BY sum_vehicle_count DESC, h.geohash ASC
 LIMIT {_FETCH_CAP};
 """
 
@@ -156,6 +167,26 @@ def _geohash_to_polygon(gh: str) -> list[list[list[float]]]:
     return [ring]
 
 
+def classify_cell_severity(avg_speed_kmh: float) -> str:
+    """Speed-only MVP classification for one measurement cell."""
+    if avg_speed_kmh < 20:
+        return "severe"
+    if avg_speed_kmh < 35:
+        return "congested"
+    if avg_speed_kmh < 50:
+        return "moderate"
+    return "free_flow"
+
+
+def compute_cell_congestion_score(avg_speed_kmh: float) -> float:
+    """Speed-derived 0-100 display score for cell coloring, not prediction."""
+    if avg_speed_kmh <= 20:
+        return 100.0
+    if avg_speed_kmh >= 50:
+        return 0.0
+    return round(((50.0 - avg_speed_kmh) / 30.0) * 100.0, 1)
+
+
 async def get_geohash_cells(
     date_str: str,
     hour: int,
@@ -164,13 +195,15 @@ async def get_geohash_cells(
     *,
     avg_speed_threshold: float = _DEFAULT_AVG_SPEED_THRESHOLD,
     window_hours: int = _DEFAULT_WINDOW_HOURS,
+    mode: CellLayerMode = "congested",
+    max_cells: int = _GEOHASH_CELL_LIMIT,
 ) -> GeohashCellResponse:
     """Aggregate the window's measurements by geohash and return cell polygons.
 
-    The filter mirrors the clustering pipeline (time window + avg_speed
-    threshold + optional region), so the returned cells are exactly the
-    measurements DBSCAN would cluster for the same parameters. *bbox* and
-    *district* are mutually exclusive; the caller enforces that.
+    Default ``mode="congested"`` preserves the original behavior: only cells
+    below the avg_speed threshold are returned. ``mode="all"`` returns every
+    measured cell in the scoped window and classifies it by avg_speed. *bbox*
+    and *district* are mutually exclusive; the caller enforces that.
 
     Returns a GeoJSON FeatureCollection of Polygon features (one per geohash
     cell), each carrying aggregated speed/volume stats.
@@ -181,6 +214,12 @@ async def get_geohash_cells(
         raise ValueError("Invalid avg_speed_threshold. Expected a positive speed in km/h.")
     if window_hours < 1:
         raise ValueError("Invalid window_hours. Expected an integer >= 1.")
+    if mode not in ("congested", "all"):
+        raise ValueError("Invalid mode. Expected 'congested' or 'all'.")
+    if max_cells < 1:
+        raise ValueError("Invalid max_cells. Expected an integer >= 1.")
+    if mode == "all" and bbox is None and district is None:
+        raise ValueError("All-cell geohash mode requires bbox or district selection.")
 
     try:
         selected_date = datetime.strptime(date_str, "%Y-%m-%d")
@@ -191,6 +230,7 @@ async def get_geohash_cells(
 
     start_ts = selected_date.replace(hour=hour, minute=0, second=0, microsecond=0)
     end_ts = start_ts + timedelta(hours=window_hours)
+    response_limit = min(max_cells, _GEOHASH_CELL_LIMIT)
 
     pool = await get_pool()
     t0 = time.monotonic()
@@ -199,29 +239,36 @@ async def get_geohash_cells(
             await _ensure_district_available(conn, district)
             rows = await conn.fetch(
                 _GEOHASH_CELL_SQL_WITH_DISTRICT,
-                start_ts, end_ts, avg_speed_threshold, district,
+                start_ts, end_ts, mode, avg_speed_threshold, district,
             )
         elif bbox is None:
             rows = await conn.fetch(
-                _GEOHASH_CELL_SQL, start_ts, end_ts, avg_speed_threshold,
+                _GEOHASH_CELL_SQL, start_ts, end_ts, mode, avg_speed_threshold,
             )
         else:
             rows = await conn.fetch(
                 _GEOHASH_CELL_SQL_WITH_BBOX,
-                start_ts, end_ts, avg_speed_threshold,
+                start_ts, end_ts, mode, avg_speed_threshold,
                 bbox[0], bbox[1], bbox[2], bbox[3],
             )
     elapsed_ms = (time.monotonic() - t0) * 1000
 
-    truncated = len(rows) > _GEOHASH_CELL_LIMIT
+    truncated = len(rows) > response_limit
     if truncated:
-        rows = rows[:_GEOHASH_CELL_LIMIT]
+        rows = rows[:response_limit]
 
     logger.info(
-        "Geohash cells: date=%s hour=%02d window=%dh speed<%.1f district=%s "
-        "cells=%d truncated=%s elapsed=%.1fms",
-        date_str, hour, window_hours, avg_speed_threshold, district or "-",
-        len(rows), truncated, elapsed_ms,
+        "Geohash cells: date=%s hour=%02d window=%dh mode=%s speed<%.1f "
+        "district=%s cells=%d truncated=%s elapsed=%.1fms",
+        date_str,
+        hour,
+        window_hours,
+        mode,
+        avg_speed_threshold,
+        district or "-",
+        len(rows),
+        truncated,
+        elapsed_ms,
     )
 
     features: list[GeohashCellFeature] = []
@@ -229,32 +276,58 @@ async def get_geohash_cells(
         gh = r["geohash"]
         if not gh:
             continue
+        if r["avg_speed_kmh"] is None:
+            continue
         try:
             coords = _geohash_to_polygon(gh)
         except ValueError:
             # Skip an unexpectedly malformed geohash rather than failing the layer.
             continue
+        avg_speed = float(r["avg_speed_kmh"])
+        severity = classify_cell_severity(avg_speed)
+        meta = _CELL_SEVERITY_META[severity]
+        measurement_count = r["measurement_count"]
         features.append(
             GeohashCellFeature(
                 geometry=GeohashCellGeometry(coordinates=coords),
                 properties=GeohashCellProperties(
                     geohash=gh,
-                    measurement_count=r["measurement_count"],
-                    avg_speed_kmh=round(r["avg_speed_kmh"], 1),
+                    measurement_count=measurement_count,
+                    record_count=measurement_count,
+                    avg_speed_kmh=round(avg_speed, 1),
                     min_speed_kmh=round(r["min_speed_kmh"], 1),
                     max_speed_kmh=round(r["max_speed_kmh"], 1),
                     sum_vehicle_count=r["sum_vehicle_count"],
                     avg_vehicle_count=round(r["avg_vehicle_count"], 1),
+                    congestion_score=compute_cell_congestion_score(avg_speed),
+                    severity=severity,
+                    severity_label=meta["label"],
+                    color=meta["color"],
                 ),
             )
         )
 
+    sev_counts = {"free_flow": 0, "moderate": 0, "congested": 0, "severe": 0}
+    for f in features:
+        sev_counts[f.properties.severity] += 1
+
+    # total_cells: approximate count including cells dropped by the cap.
+    # When truncated, the DB returned _FETCH_CAP rows (limit+1), so the real
+    # total is at least that many; use len(rows) before capping as the best
+    # available approximation.
+    total_matched = len(features) + (1 if truncated else 0)
+
     return GeohashCellResponse(
         date=date_str,
         hour=hour,
+        mode=mode,
         window_hours=window_hours,
-        avg_speed_threshold=avg_speed_threshold,
+        avg_speed_threshold=avg_speed_threshold if mode == "congested" else None,
+        max_cells=response_limit,
         cell_count=len(features),
+        total_cells=total_matched,
+        returned_cells=len(features),
+        severity_counts=SeverityCounts(**sev_counts),
         truncated=truncated,
         features=features,
     )

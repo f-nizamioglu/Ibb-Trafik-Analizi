@@ -42,6 +42,18 @@ from backend.app.services.road_service import (
 
 router = APIRouter()
 
+_GEOHASH_ALL_MODE_MAX_BBOX_AREA_DEG2 = 0.50
+_GEOHASH_ALL_MODE_MAX_BBOX_SPAN_DEG = 1.25
+_GEOHASH_MAX_CELLS_LIMIT = 4000
+
+
+def _bbox_area_deg2(bbox: tuple[float, float, float, float]) -> float:
+    return (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+
+
+def _bbox_max_span_deg(bbox: tuple[float, float, float, float]) -> float:
+    return max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+
 
 @router.get(
     "/clusters",
@@ -306,9 +318,20 @@ async def list_geohash_cells(
         ge=0,
         le=23,
     ),
+    mode: Literal["congested", "all"] = Query(
+        "congested",
+        description=(
+            "Cell mode. 'congested' preserves the existing avg_speed-filtered "
+            "cell layer. 'all' returns all measured cells in the selected "
+            "bbox/district and classifies each by traffic condition."
+        ),
+    ),
     avg_speed_threshold: Optional[float] = Query(
         None,
-        description="Keep measurements with avg_speed below this (km/h). Default 25.",
+        description=(
+            "Congested mode only: keep measurements with avg_speed below this "
+            "(km/h). Default 25."
+        ),
         gt=0,
         le=120,
     ),
@@ -340,6 +363,12 @@ async def list_geohash_cells(
             "Optional district key (e.g. 'besiktas') to filter by the real "
             "district polygon. Mutually exclusive with the bbox parameters."
         ),
+    ),
+    max_cells: Optional[int] = Query(
+        None,
+        description="Maximum cells returned. Hard-capped at 4000.",
+        ge=1,
+        le=_GEOHASH_MAX_CELLS_LIMIT,
     ),
 ):
     """
@@ -390,11 +419,34 @@ async def list_geohash_cells(
                 detail="'district' and bbox parameters are mutually exclusive.",
             )
 
+    if mode == "all" and bbox is None and district_key is None:
+        raise HTTPException(
+            status_code=400,
+            detail="All-cell geohash mode requires bbox or district selection.",
+        )
+
+    if mode == "all" and bbox is not None:
+        if (
+            _bbox_area_deg2(bbox) > _GEOHASH_ALL_MODE_MAX_BBOX_AREA_DEG2
+            or _bbox_max_span_deg(bbox) > _GEOHASH_ALL_MODE_MAX_BBOX_SPAN_DEG
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Bbox is too large for all-cell geohash mode. "
+                    "Zoom in, use a rectangle, or select a district."
+                ),
+            )
+
     tuning: dict = {}
-    if avg_speed_threshold is not None:
+    if mode != "congested":
+        tuning["mode"] = mode
+    if mode == "congested" and avg_speed_threshold is not None:
         tuning["avg_speed_threshold"] = avg_speed_threshold
     if window_hours is not None:
         tuning["window_hours"] = window_hours
+    if max_cells is not None:
+        tuning["max_cells"] = max_cells
 
     try:
         if district_key is not None:
@@ -474,6 +526,14 @@ async def list_congested_roads(
             "'all' returns the previous capped/clipped segment behavior."
         ),
     ),
+    style: Literal["plain", "traffic"] = Query(
+        "plain",
+        description=(
+            "Road styling. 'plain' clips road lines to the congested cell area "
+            "(neutral context overlay). 'traffic' colors the major corridors by "
+            "cell-derived severity (length-weighted mean of intersecting cells)."
+        ),
+    ),
 ):
     """
     Road lines clipped to the selected congested geohash measurement cells.
@@ -530,12 +590,32 @@ async def list_congested_roads(
             detail="Road lines require bbox or district selection.",
         )
 
+    # Traffic-corridor style keeps every measured cell (no avg_speed pre-filter),
+    # so reuse the all-cell area guard to avoid an expensive full-region road×cell
+    # join over a wide bbox. Districts are bounded, so they need no extra guard.
+    if style == "traffic" and bbox is not None:
+        if (
+            _bbox_area_deg2(bbox) > _GEOHASH_ALL_MODE_MAX_BBOX_AREA_DEG2
+            or _bbox_max_span_deg(bbox) > _GEOHASH_ALL_MODE_MAX_BBOX_SPAN_DEG
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Bbox is too large for traffic-corridor style. "
+                    "Zoom in, use a rectangle, or select a district."
+                ),
+            )
+
     tuning: dict = {}
     if avg_speed_threshold is not None:
         tuning["avg_speed_threshold"] = avg_speed_threshold
     if window_hours is not None:
         tuning["window_hours"] = window_hours
     tuning["road_level"] = road_level
+    # Only forward a non-default style so the default call path — and the existing
+    # plain-style tests asserting exact kwargs — stay byte-for-byte unchanged.
+    if style != "plain":
+        tuning["style"] = style
 
     try:
         if district_key is not None:
